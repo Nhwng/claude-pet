@@ -74,7 +74,8 @@ class PetApp(MenuMixin):
         root.overrideredirect(True)
         root.attributes('-topmost', True)
         root.attributes('-transparentcolor', KEY)
-        self.dpi = max(1, round(root.winfo_fpixels('1i') / 96))
+        root.report_callback_exception, self.errors = self.report, set()
+        self.dpi =max(1, round(root.winfo_fpixels('1i') / 96))
         self.ui = 2 * self.dpi  # bubbles, plates and effects; the pets themselves use self.scale
         self.canvas = tk.Canvas(root, bg=KEY, highlightthickness=0)
         self.canvas.pack()
@@ -99,16 +100,29 @@ class PetApp(MenuMixin):
         self.tick()
         root.mainloop()
 
+    def report(self, *exc):
+        """An error in a Tk callback. pythonw has no console, so each distinct one goes to errors.log once."""
+        import traceback
+        text = ''.join(traceback.format_exception(*exc))
+        if text in self.errors or len(self.errors) > 20:
+            return
+        self.errors.add(text)
+        try:
+            with (pet.STATE_DIR / 'errors.log').open('a', encoding='utf-8') as f:
+                f.write(f"{time.strftime('%m-%d %H:%M:%S')} {text}\n")
+        except OSError:
+            pass
+
     def apply(self, settings):
         """Use a pet pack and size. Pets are dealt again from the new pack on this poll."""
         self.pack_key = settings['pack'] if settings['pack'] in packs() else 'cats'
         self.settings, self.pack = settings, packs()[self.pack_key]
+        self.canvas.delete('all')
+        self.images, self.cats, self.menu_hits = {}, {}, None  # first: the old pets' kinds mean nothing in this pack
         self.scale = (self.pack['scale'] + settings['big']) * self.dpi
         tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])
         self.h = (tallest + 10) * self.scale + 40 * self.ui
         self.place(self.area)
-        self.canvas.delete('all')
-        self.images, self.cats, self.menu_hits = {}, {}, None
         self.drop = float(self.h) if self.hide else 0.0
 
     def place(self, area):
