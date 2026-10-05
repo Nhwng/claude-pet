@@ -4,7 +4,7 @@
 
 Pixel pets that live above your Windows taskbar and tell you when **Claude Code** is done or needs you, so you can watch YouTube while it works.
 
-![Three slimes on the taskbar hopping and using Water Gun, Ember and Razor Leaf, one saying "blog is done!", one asking to run npm run migrate](docs/demo-critters.gif)
+![Three slimes on the taskbar hopping and using Water Gun, Ember and Razor Leaf, one saying "blog is done!", one asking to run npm run migrate](docs/demo-slimes.gif)
 
 ![Cats on the taskbar: one chasing yarn, one saying "blog is done!", one asking to run npm run migrate, one asleep](docs/demo-cats.gif)
 
