@@ -427,11 +427,12 @@ def selftest():
         assert base == Path(tmp) and [h['key'] for h in found['heroes']] == ['k'] and found['bosses'] == [], \
             'the first usable cast file; characters missing an animation are left out'
         assert cast.load([Path(tmp, 'broken.json')]) == ({}, None), 'no cast: Game mode waits'
-        combo = {**hero, 'anims': {**hero['anims'], 'attack2': {**anim, 'n': 10}}, 'hits': {'attack2': 7}}
+        combo = {**hero, 'anims': {**hero['anims'], 'attack2': {**anim, 'n': 10}}, 'hits': {'attack2': [1, 3, 7]}}
         Path(tmp, 'combo.json').write_text(json.dumps({'heroes': [combo]}), 'utf-8')
         sprites = cast.Sprites(None, *cast.load([Path(tmp, 'combo.json')]), 1)
-        assert sprites.attacks('heroes', 0) == ['attack', 'attack2'] and sprites.hit('heroes', 0, 'attack2') == 7, \
-            'every attack a hero has, each landing on its own frame'
+        assert sprites.attacks('heroes', 0) == ['attack', 'attack2'] and sprites.hits('heroes', 0, 'attack2') == [1, 3, 7], \
+            'every attack a hero has, a combo landing several blows'
+        assert sprites.hits('heroes', 0, 'attack') == [2], 'no hits measured: the middle frame'
         Path(tmp, 'odd.json').write_text(json.dumps({'heroes': [hero], 'bugs': 5, 'bosses': [{**hero, 'body': 'x'}]}))
         odd, _ = cast.load([Path(tmp, 'odd.json')])
         assert odd['bugs'] == [] and odd['bosses'] == [], 'a malformed group or box is left out, not fatal'

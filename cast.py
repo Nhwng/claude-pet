@@ -72,10 +72,14 @@ class Sprites:
         """'attack', 'attack2'…: the blows this character can pick from."""
         return sorted(a for a in self.cast[group][index]['anims'] if a.startswith('attack'))
 
-    def hit(self, group, index, anim):
-        """The frame of an attack where the blow lands (or the shot leaves)."""
+    def hits(self, group, index, anim):
+        """The frames of an attack where blows land (or shots leave): a combo has several."""
         c = self.cast[group][index]
-        return (c.get('hits') or {}).get(anim, c.get('hit', 0) if anim == 'attack' else c['anims'][anim]['n'] // 2)
+        found = (c.get('hits') or {}).get(anim)
+        found = [found] if isinstance(found, int) else found
+        if not isinstance(found, list) or not all(isinstance(i, int) for i in found) or not found:
+            found = [c['anims'][anim]['n'] // 2]
+        return found
 
     def frames_in(self, group, index, anim):
         a = self.cast[group][index]['anims'][anim]

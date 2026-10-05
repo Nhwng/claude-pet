@@ -12,9 +12,10 @@ Recipe: {"heroes": [...], "bugs": [...], "bosses": [...]}, each character:
      "anims": {"idle": {"sheet": "Idle.png", "w": 140, "h": 140}, "attack": {...}, ...}}
 Paths in the recipe and in the cast are relative to the cast file's folder. An anim may set "count" to use only its
 first frames (e.g. a run whose last frames turn back to idle) and "fps". A character may set "faces" ("right" or
-"left") when the guess is wrong, "hit" (the attack frame a blow lands on), and "tone": [contrast, colour, brightness]
+"left") when the guess is wrong, and "tone": [contrast, colour, brightness]
 to liven up a dull palette next to the others (e.g. [1.25, 1.4, 1.12]). Besides "attack", a hero may have "attack2",
-"attack3"…: each blow then picks one at random; "hits": {"attack2": 5} sets where one lands when the guess is wrong.
+"attack3"…: each blow then picks one at random. Where blows land is measured (a combo lands several); "hits":
+{"attack2": [1, 3, 7]} sets the frames when the guess is wrong.
 "height": 70 makes the body that many screen px tall (Scale2x up, smooth down), which evens out packs drawn at
 different sizes; it replaces "scale".
 """
@@ -75,6 +76,17 @@ def fit(img, factor):
     return img
 
 
+def strikes(frames, body, faces):
+    """The frames of an attack where a blow lands: each time its reach (past the body's front) peaks, high enough
+    to be a blow and not the wind-up. A combo has several."""
+    boxes = [(f.getbbox() or (0, 0, 0, 0)) for f in frames]
+    reach = [b[2] - body[2] if faces == 'right' else body[0] - b[0] for b in boxes]
+    enough = max(.3 * (body[2] - body[0]), .6 * max(reach))
+    peaks = [i for i, r in enumerate(reach) if r >= enough and (i == 0 or r > reach[i - 1])
+             and (i == len(reach) - 1 or r >= reach[i + 1])]
+    return peaks or [max(range(len(reach)), key=reach.__getitem__)]
+
+
 def measure(character, root, out_dir):
     """A character's cast entry. "tone": [contrast, colour, brightness] re-colours its sheets and "height" (the
     body's, in screen px) resizes them, so packs drawn at different sizes come out alike; either way the new
@@ -117,14 +129,10 @@ def measure(character, root, out_dir):
         reach = union(f.getbbox() for f in frames_of['attack'])
         faces = 'right' if reach[2] - body[2] >= body[0] - reach[0] else 'left'
     faces = character.get('faces', faces)  # a recipe may say, when the guess from the attack is wrong
-    hits = {}
-    for name, frames in frames_of.items():  # attack, attack2…: the frame reaching furthest is where it lands
-        if name.startswith('attack'):
-            boxes = [(f.getbbox() or (0, 0, 0, 0)) for f in frames]
-            hits[name] = max(range(len(frames)), key=lambda i: boxes[i][2] if faces == 'right' else -boxes[i][0])
+    hits = {name: strikes(frames, body, faces) for name, frames in frames_of.items() if name.startswith('attack')}
     hits.update(character.get('hits', {}))
     out = {k: v for k, v in character.items() if k not in ('dir', 'anims', 'hits')}
-    out.update(anims=anims, body=body, faces=faces, hits=hits, hit=character.get('hit', hits.get('attack', 0)))
+    out.update(anims=anims, body=body, faces=faces, hits=hits)
     if factor:
         out['scale'] = 1  # already the size it should be on screen
     return out
@@ -138,7 +146,7 @@ def main(recipe_path, cast_path):
     Path(cast_path).write_text(json.dumps(cast, ensure_ascii=False, indent=1) + '\n', 'utf-8')
     for group, chars in cast.items():
         for c in chars:
-            print(f"{group:7} {c['key']:10} faces {c['faces']:5} body {c['body']} hit {c['hit']}  "
+            print(f"{group:7} {c['key']:10} faces {c['faces']:5} body {c['body']} hits {c['hits']}  "
                   + ' '.join(f"{a}:{v['n']}" for a, v in c['anims'].items()))
 
 
