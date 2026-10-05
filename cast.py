@@ -6,6 +6,7 @@ A frame comes with where the body is in it: the window places the body's left ed
 ground, whatever room the artist left around it for swings and spells.
 """
 import json
+import random
 from pathlib import Path
 
 GROUPS = ('heroes', 'bugs', 'bosses')
@@ -46,6 +47,14 @@ def load(files=FILES):
     return {}, None
 
 
+def pick_boss(bosses, tier):
+    """Which boss turns up for a hero of this tier: one its tier has unlocked (a boss's "tier" in the cast, 0 when
+    missing), the higher ones more often. When none is unlocked yet, the lowest still come."""
+    tiers = [max(0, b['tier']) if isinstance(b.get('tier'), int) else 0 for b in bosses]
+    pool = [i for i, t in enumerate(tiers) if t <= tier] or [i for i, t in enumerate(tiers) if t == min(tiers)]
+    return random.choices(pool, weights=[1 + tiers[i] for i in pool])[0]
+
+
 class Sprites:
     """Frames of a loaded cast as PhotoImages: frame(group, index, anim, i, flip) -> dict, see below."""
 
@@ -63,10 +72,11 @@ class Sprites:
         s = self.scale(group, index)
         return round((x1 - x0) * s), round((y1 - y0) * s)
 
-    def tallest(self, group):
-        """How far above the feet anything of this group is ever drawn, in screen px."""
+    def tallest(self, group, anims=None):
+        """How far above the feet anything of this group is ever drawn (in these animations), in screen px."""
         return max((round((c['body'][3] - a['crop'][1]) * self.scale(group, i))
-                    for i, c in enumerate(self.cast[group]) for a in c['anims'].values()), default=0)
+                    for i, c in enumerate(self.cast[group]) for name, a in c['anims'].items()
+                    if anims is None or name in anims), default=0)
 
     def attacks(self, group, index):
         """'attack', 'attack2'…: the blows this character can pick from."""

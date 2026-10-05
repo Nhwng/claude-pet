@@ -13,7 +13,7 @@ import pet
 from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, screen_area,
                  title_matches, write_config)
 import sounds
-from game import GameMixin
+from game import BOSS_ANIMS, GameMixin
 from look import (ALARM_COLORS, CHIP_LINE, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER,
                   SHADOW, TEXT, TIER_COLORS, XP_COLOR)
 from menu import MenuMixin
@@ -142,7 +142,8 @@ class PetApp(GameMixin, MenuMixin):
         self.images, self.cats, self.menu_hits = {}, {}, None  # first: the old pets' kinds mean nothing in this pack
         if self.game:  # the cast's frames come zoomed already: screen px throughout
             self.scale = 1
-            self.h = max(self.sprites.tallest('heroes'), self.sprites.tallest('bosses')) + 10 * self.dpi + 40 * self.ui
+            tallest = max(self.sprites.tallest('heroes'), self.sprites.tallest('bosses', BOSS_ANIMS))
+            self.h = tallest + 10 * self.dpi + 40 * self.ui
         else:
             self.scale = (self.pack['scale'] + settings['big']) * self.dpi
             tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])

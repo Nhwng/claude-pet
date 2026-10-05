@@ -438,6 +438,12 @@ def selftest():
         assert odd['bugs'] == [] and odd['bosses'] == [], 'a malformed group or box is left out, not fatal'
         assert cast.load([Path(tmp, 'odd.json')]) and not cast.usable({**hero, 'anims': {
             **hero['anims'], 'run': {**anim, 'fps': 0}}}, Path(tmp)), 'an animation needs a speed'
+    bosses = [{'tier': 0}, {'tier': 2}, {'tier': 'big'}, {}]
+    assert {cast.pick_boss(bosses, 0) for _ in range(200)} == {0, 2, 3}, 'a boss waits for its tier; no tier is 0'
+    assert {cast.pick_boss(bosses, 3) for _ in range(200)} == {0, 1, 2, 3}, 'gold meets them all'
+    assert {cast.pick_boss([{'tier': 3}, {'tier': 2}, {'tier': -5}], 0) for _ in range(50)} == {2}, \
+        'a tier below 0 counts as 0'
+    assert {cast.pick_boss([{'tier': 3}, {'tier': 2}], 0) for _ in range(50)} == {1}, 'none unlocked: the lowest'
     gained, recent = xp.count(b''.join(reply(f'r{i}', 1).encode() for i in range(xp.RECENT + 50)), {})
     assert gained == xp.RECENT + 50 and len(recent) == xp.RECENT, 'remembered ids stay bounded'
     real_dir = STATE_DIR

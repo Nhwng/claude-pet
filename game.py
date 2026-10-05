@@ -33,7 +33,8 @@ SPARK = ('#ffffff', '#ffd23f')                                   # a blow's spar
 RAYS = ((1, 0), (0, 1), (-1, 0), (0, -1), (.7, .7), (-.7, .7), (.7, -.7), (-.7, -.7))
 BOSS_AT = 45                  # ui px from the hero where the boss turns up
 BOSS_SPEED = 26               # ui px per second: it marches, it does not scuttle
-BUG_HP, BOSS_HP = (1, 2, 2, 3), 3   # blows it takes (a bug's is picked from these)
+BUG_HP, BOSS_HP = (1, 2, 2, 3), 3   # blows it takes (a bug's is picked from these; a boss's, plus the hero's tier)
+BOSS_ANIMS = ('idle', 'run', 'hurt', 'death')   # a boss never swings back, so its attack frames never show
 KNOCKBACK = 12                # ui px a blow sends a bug sliding back (half that for the boss)
 MELEE = ('slash', 'punch')    # these run up to a bug; the others shoot from where they stand
 CHARGE_SPEED, PATROL_SPEED = 40, 14   # ui px per second
@@ -283,7 +284,8 @@ class GameMixin:
             cat.shake = SHAKE_SECS
 
     def finish(self, cat, dt):
-        """Claude is done: this task's boss walks up beside the hero and goes down to one blow; the rest flee."""
+        """Claude is done: this task's boss walks up beside the hero and is cut down, blow by blow; the rest flee.
+        The higher the hero's tier, the more blows it takes and the bigger the bosses that can come."""
         ts = cat.rec.get('ts', 0)
         if cat.beaten == ts:
             return
@@ -293,13 +295,14 @@ class GameMixin:
             return
         u, w = self.ui, self.width(cat.kind)
         if cat.boss is None:
-            bw = self.sprites.body('bosses', 0)[0]
+            kind = cast.pick_boss(self.sprites.cast['bosses'], cat.tier)
+            bw = self.sprites.body('bosses', kind)[0]
             room_right = cat.x + w + BOSS_AT * u + bw <= self.w
             cat.dir = 1 if room_right else -1
             x = cat.x + w + BOSS_AT * u + bw / 2 if room_right else cat.x - BOSS_AT * u - bw / 2
-            cat.boss = {'x': min(max(x, bw / 2), self.w - bw / 2), 't': 0.0, 'hit': None, 'w': bw,
-                        'hp': BOSS_HP, 'stun': 0.0, 'push': 0.0, 'near': False}
-        boss = cat.boss
+            cat.boss = {'kind': kind, 'x': min(max(x, bw / 2), self.w - bw / 2), 't': 0.0, 'hit': None, 'w': bw,
+                        'hp': BOSS_HP + cat.tier, 'max': BOSS_HP + cat.tier, 'stun': 0.0, 'push': 0.0, 'near': False}
+        boss, kind = cat.boss, cat.boss['kind']
         boss['t'] += dt
         gap = boss['x'] - (cat.x + w / 2)
         boss['near'] = abs(gap) <= w / 2 + boss['w'] / 2 + 2 * u
@@ -312,13 +315,13 @@ class GameMixin:
             self.start_swing(cat)                                        # ...who cuts it down, blow by blow
         if self.swing(cat, dt) and boss['hit'] is None and boss['near']:
             boss['hp'] -= 1
-            self.impact(cat, boss['x'], self.sprites.body('bosses', 0)[1] * .6, boss=True, kill=boss['hp'] <= 0)
+            self.impact(cat, boss['x'], self.sprites.body('bosses', kind)[1] * .6, boss=True, kill=boss['hp'] <= 0)
             if boss['hp'] <= 0:
                 boss['hit'] = boss['t']
             else:
-                boss['stun'] = self.anim_secs('bosses', 0, 'hurt')
+                boss['stun'] = self.anim_secs('bosses', kind, 'hurt')
                 boss['push'] = (1 if gap > 0 else -1) * KNOCKBACK / 2 * u / boss['stun']
-        if boss['hit'] is not None and boss['t'] - boss['hit'] >= self.anim_secs('bosses', 0, 'death') + .4:
+        if boss['hit'] is not None and boss['t'] - boss['hit'] >= self.anim_secs('bosses', kind, 'death') + .4:
             cat.boss, cat.beaten, cat.swing = None, ts, 0.0
 
     def game_pose(self, cat):
@@ -363,17 +366,17 @@ class GameMixin:
             if boss['hit'] is not None:
                 anim, t = 'death', boss['t'] - boss['hit']
             elif boss['stun'] > 0:
-                anim, t = 'hurt', self.anim_secs('bosses', 0, 'hurt') - boss['stun']
+                anim, t = 'hurt', self.anim_secs('bosses', boss['kind'], 'hurt') - boss['stun']
             else:
                 anim, t = ('idle' if boss['near'] else 'run'), boss['t']
-            n, fps = self.sprites.frames_in('bosses', 0, anim)
+            n, fps = self.sprites.frames_in('bosses', boss['kind'], anim)
             i = min(int(t * fps), n - 1) if anim in ('death', 'hurt') else int(t * fps)
-            f = self.put_sprite('bosses', 0, anim, i, 1 if boss['x'] < center else -1, boss['x'], ground)
+            f = self.put_sprite('bosses', boss['kind'], anim, i, 1 if boss['x'] < center else -1, boss['x'], ground)
             c.tag_lower(f['item'], cat.item)  # the hero's "done!" bubble stays readable over a big boss
             if boss['hit'] is None:  # its life bar, shorter with every blow
                 top, half = ground - f['h'] - 3 * u, f['w'] // 2
-                left = boss['x'] - half
-                for x0, x1, color in ((left, left + 2 * half, INK), (left, left + 2 * half * boss['hp'] / BOSS_HP, '#e5484d')):
+                left, life = boss['x'] - half, 2 * half * boss['hp'] / boss['max']
+                for x0, x1, color in ((left, left + 2 * half, INK), (left, left + life, '#e5484d')):
                     bar = c.create_rectangle(x0, top, x1, top + u, fill=color, width=0, tags=('fx',))
                     c.tag_lower(bar, cat.item)  # under the hero and its bubble, which may reach over the boss
         hand_y = ground - self.sprites.body('heroes', cat.kind)[1] * .55
