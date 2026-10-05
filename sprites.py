@@ -1,6 +1,6 @@
 """How the pets look: pixel art as rows of palette letters, the cat breeds, and the pet packs.
 
-The cats are drawn here in code; every packs/*.json adds a pack of one-pose sprites (see hoenn.json).
+The cats are drawn here in code; every packs/*.json adds a pack of one-pose sprites (format in the README).
 """
 import functools
 import json

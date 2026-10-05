@@ -382,10 +382,10 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
         assert read_config() == {'pack': 'cats', 'big': False, 'lang': 'en', 'picks': {}}
-        write_config(pack='hoenn', picks={'hoenn': {'c--code-shop': 'Mudkip'}})
+        write_config(pack='sample', picks={'sample': {'c--code-shop': 'Blob'}})
         write_config(big=True)
-        assert read_config() == {'pack': 'hoenn', 'big': True, 'lang': 'en', 'picks': {'hoenn': {'c--code-shop': 'Mudkip'}}}
-        assert load_states(time.time()) == {} and read_config()['pack'] == 'hoenn', 'config is not a session'
+        assert read_config() == {'pack': 'sample', 'big': True, 'lang': 'en', 'picks': {'sample': {'c--code-shop': 'Blob'}}}
+        assert load_states(time.time()) == {} and read_config()['pack'] == 'sample', 'config is not a session'
     STATE_DIR = real_dir
     print('ok')
 
