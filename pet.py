@@ -32,6 +32,8 @@ ALARMS = ('done', 'waiting')
 STALE_SECS = 15 * 60      # 'working' with no event this long: probably interrupted (Esc fires no Stop)
 FORGET_SECS = 6 * 3600    # VS Code can close without SessionEnd
 LOG_MAX = 512 * 1024
+PROGRAMS = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs'
+START_LINK, STARTUP_LINK = PROGRAMS / 'Claude Pet.lnk', PROGRAMS / 'Startup' / 'Claude Pet.lnk'  # menu; sign-in
 
 
 # ---------- hook side: Claude Code event -> ~/.claude-pet/<session>.json ----------
@@ -186,12 +188,16 @@ def install(remove=False):
     os.replace(tmp, SETTINGS)  # all or nothing: a crash can't leave half a settings file
     print(f'{"Removed" if remove else "Installed"} Claude Pet hooks in {SETTINGS} (backup: {backup.name})')
     shortcut(remove)
+    if remove:
+        STARTUP_LINK.unlink(missing_ok=True)
+    elif STARTUP_LINK.exists():
+        shortcut(link=STARTUP_LINK)  # "start with Windows" is on: point it at this folder and Python too
 
 
-def shortcut(remove=False):
-    """The Start Menu entry that starts the pet (paths go through env vars, so any folder name is fine)."""
+def shortcut(remove=False, link=START_LINK):
+    """A shortcut that starts the pet: the Start Menu entry, or STARTUP_LINK to start it when you sign in
+    (paths go through env vars, so any folder name is fine)."""
     import subprocess
-    link = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Claude Pet.lnk'
     if remove:
         link.unlink(missing_ok=True)
         return
@@ -201,17 +207,19 @@ def shortcut(remove=False):
     script = ('$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:PET_LINK); $s.TargetPath = $env:PET_PYTHONW; '
               '$s.Arguments = $env:PET_SCRIPT; $s.WorkingDirectory = $env:PET_DIR; $s.IconLocation = $env:PET_ICON; $s.Save()')
     powershell = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'
-    done = subprocess.run([str(powershell), '-NoProfile', '-Command', script], env=env, capture_output=True).returncode == 0
-    print(f'Start Menu shortcut: {link}' if done else 'Could not create the Start Menu shortcut (start it with pythonw pet.py)')
+    done = subprocess.run([str(powershell), '-NoProfile', '-Command', script], env=env, capture_output=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW).returncode == 0  # no console flash from the pet
+    print(f'Shortcut: {link}' if done else 'Could not create the shortcut (start it with pythonw pet.py)')
 
 
 def read_config():
-    """{pack, big, sound, lang, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
+    """{pack, big, sound, lang, screen, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet.
+    screen: 'main', 'auto' (follow the window you're in) or a monitor's device name."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
     picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
     lang = cfg.get('lang') if cfg.get('lang') in ('en', 'vi') else 'en'
     return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'sound': cfg.get('sound') is not False,
-            'lang': lang, 'picks': picks}
+            'lang': lang, 'screen': cfg.get('screen') if isinstance(cfg.get('screen'), str) else 'main', 'picks': picks}
 
 
 def write_config(**changes):
@@ -266,6 +274,13 @@ def is_fullscreen(rect, monitor, window_class):
     Both are (left, top, right, bottom); a second monitor's left or top need not be 0."""
     return (window_class not in ('Progman', 'WorkerW')  # the desktop itself is screen-sized too
             and rect[0] <= monitor[0] and rect[1] <= monitor[1] and rect[2] >= monitor[2] and rect[3] >= monitor[3])
+
+
+def screen_area(choice, monitors):
+    """The work area of the chosen monitor ('main' or a device name); an unplugged one means the main one.
+    monitors: [{'device', 'primary', 'work'}], work = (left, top, right, bottom)."""
+    main = next((m for m in monitors if m['primary']), monitors[0])
+    return next((m for m in monitors if m['device'] == choice), main)['work']
 
 
 def load_states(now):
@@ -328,6 +343,11 @@ def selftest():
     assert not is_fullscreen((0, 0, 1920, 1080), screen, 'Progman'), 'the desktop is not a video'
     assert is_fullscreen((1920, 0, 3840, 1080), right_screen, 'Chrome_WidgetWin_1'), 'fullscreen on a second monitor'
     assert not is_fullscreen((0, 0, 1920, 1080), right_screen, 'Chrome_WidgetWin_1')
+    monitors = [{'device': 'DISPLAY1', 'primary': True, 'work': (0, 0, 1920, 1032)},
+                {'device': 'DISPLAY2', 'primary': False, 'work': (-2560, 0, -853, 1019)}]
+    assert screen_area('main', monitors) == (0, 0, 1920, 1032) and screen_area('auto', monitors) == (0, 0, 1920, 1032)
+    assert screen_area('DISPLAY2', monitors) == (-2560, 0, -853, 1019)
+    assert screen_area('DISPLAY9', monitors) == (0, 0, 1920, 1032), 'an unplugged screen falls back to the main one'
     from look import TEXT
     from sounds import CHIMES, notes
     assert all(notes(kind) for kind in CHIMES) and max(abs(v) for v in notes('done')) < 32767, 'chimes render, no clipping'
@@ -388,10 +408,10 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
-        assert read_config() == {'pack': 'cats', 'big': False, 'sound': True, 'lang': 'en', 'picks': {}}
+        assert read_config() == {'pack': 'cats', 'big': False, 'sound': True, 'lang': 'en', 'screen': 'main', 'picks': {}}
         write_config(pack='sample', picks={'sample': {'c--code-shop': 'Blob'}})
         write_config(big=True)
-        assert read_config() == {'pack': 'sample', 'big': True, 'sound': True, 'lang': 'en',
+        assert read_config() == {'pack': 'sample', 'big': True, 'sound': True, 'lang': 'en', 'screen': 'main',
                                  'picks': {'sample': {'c--code-shop': 'Blob'}}}
         assert load_states(time.time()) == {} and read_config()['pack'] == 'sample', 'config is not a session'
     STATE_DIR = real_dir

@@ -1,8 +1,9 @@
 """The right-click menu: a small bar (swap this pet, ⚙ settings) and the settings panel behind the gear."""
+import threading
 import time
 
 from look import CHECK_BOX, CHIP_LINE, DICE, FONT_TAG, FONT_TITLE, GEAR, ICON_COLORS, INK, MUTED, PAPER, TEXT, WAIT_INK
-from pet import write_config
+from pet import STARTUP_LINK, shortcut, write_config
 from sprites import ICONS, packs, tr
 
 
@@ -26,22 +27,33 @@ class MenuMixin:
         self.show_bar([row])
 
     def open_settings(self):
-        """⚙: which pack, bigger pets, sound, language, quit."""
+        """⚙: which pack, which screen, bigger pets, sound, start with Windows, language, quit."""
         lang = self.settings['lang']
         text = TEXT[lang]
-        pack_row = [(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
-                    for key, pack in packs().items()]
-        options = [('big', text['big'], 'check', self.settings['big']),
-                   ('sound', text['sound'], 'check', self.settings['sound']),
-                   ('lang', text['other_lang'], None, False), ('quit', text['quit'], None, False)]
-        self.show_bar([pack_row, options], label=text['pets'])
+        rows = [[(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
+                 for key, pack in packs().items()]]
+        labels = [text['pets']]
+        monitors = self.monitors()
+        if len(monitors) > 1:
+            names = [text['screen_main']] + ([text['screen_second']] if len(monitors) == 2 else
+                                             [text['screen_n'].format(n=n) for n in range(2, len(monitors) + 1)])
+            keys = ['main' if m['primary'] else m['device'] for m in monitors]
+            rows.append([(f'screen:{key}', name, None, key == self.settings['screen']) for key, name in zip(keys, names)]
+                        + [('screen:auto', text['screen_auto'], None, self.settings['screen'] == 'auto')])
+            labels.append(text['screen'])
+        rows.append([('big', text['big'], 'check', self.settings['big']),
+                     ('sound', text['sound'], 'check', self.settings['sound']),
+                     ('autostart', text['autostart'], 'check', STARTUP_LINK.exists()),
+                     ('lang', text['other_lang'], None, False), ('quit', text['quit'], None, False)])
+        self.show_bar(rows, labels)
 
-    def show_bar(self, rows, label=None):
-        """Lay rows of chips out on one card at the top of the strip, with ✕ closing it on the first row."""
+    def show_bar(self, rows, labels=()):
+        """Lay rows of chips out on one card at the top of the strip, each after its label (if any),
+        with ✕ closing it on the first row."""
         self.close_menu()
         s = self.ui
         sizes = [[self.chip_size(text, icon) for _, text, icon, _ in row] for row in rows]
-        label_w = self.measure(label, FONT_TAG)[0] + 3 * s if label else 0
+        label_w = max((self.measure(label, FONT_TAG)[0] + 3 * s for label in labels if label), default=0)
         close_w = self.measure('✕', FONT_TITLE)[0]
         row_h = [max(h for _, h in row) for row in sizes]
         widths = [label_w + sum(w + 2 * s for w, _ in row) for row in sizes]
@@ -52,8 +64,9 @@ class MenuMixin:
         hits, top = [], y0 + 3 * s
         for i, (row, row_sizes) in enumerate(zip(rows, sizes)):
             mid, cx = top + row_h[i] // 2, x0 + 4 * s + label_w
-            if i == 0 and label:
-                self.canvas.create_text(x0 + 4 * s, mid, text=label, font=FONT_TAG, fill=MUTED, anchor='w', tags=('menu',))
+            if i < len(labels) and labels[i]:
+                self.canvas.create_text(x0 + 4 * s, mid, text=labels[i], font=FONT_TAG, fill=MUTED, anchor='w',
+                                        tags=('menu',))
             for (action, text, icon, on), (w, h) in zip(row, row_sizes):
                 self.chip(cx, mid - h // 2, w, h, text, icon, on, action == 'quit')
                 hits.append((cx, mid - h // 2, cx + w, mid + h // 2, action))
@@ -144,3 +157,7 @@ class MenuMixin:
             self.swap(self.cats[self.menu_sid])
         elif action.startswith('pack:'):
             write_config(pack=action[5:])
+        elif action.startswith('screen:'):
+            write_config(screen=action[7:])
+        elif action == 'autostart':  # PowerShell makes the shortcut in about a second: don't freeze the pets for it
+            threading.Thread(target=shortcut, args=(STARTUP_LINK.exists(), STARTUP_LINK), daemon=True).start()

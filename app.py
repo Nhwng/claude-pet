@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 
 import pet
-from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, title_matches,
-                 write_config)
+from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, screen_area,
+                 title_matches, write_config)
 import sounds
 from look import ALARM_COLORS, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER, SHADOW, TEXT
 from menu import MenuMixin
@@ -43,6 +43,8 @@ def user32():
     u.GetClassNameW.argtypes = (w.HWND, w.LPWSTR, ctypes.c_int)
     u.MonitorFromWindow.argtypes, u.MonitorFromWindow.restype = (w.HWND, w.DWORD), w.HMONITOR
     u.GetMonitorInfoW.argtypes = (w.HMONITOR, ctypes.c_void_p)
+    u.EnumDisplayMonitors.argtypes = (w.HDC, ctypes.c_void_p,
+                                      ctypes.WINFUNCTYPE(w.BOOL, w.HMONITOR, w.HDC, ctypes.c_void_p, w.LPARAM), w.LPARAM)
     return u
 
 
@@ -131,6 +133,31 @@ class PetApp(MenuMixin):
         self.u.GetMonitorInfoW(self.u.MonitorFromWindow(hwnd, 2), ctypes.byref(info))  # 2: the nearest one
         return tuple((r.left, r.top, r.right, r.bottom) for r in (info.rcMonitor, info.rcWork))
 
+    def monitors(self):
+        """Every monitor as {device, primary, work}, the main one first, then left to right."""
+        import ctypes
+        from ctypes import wintypes as w
+
+        class MonitorInfoEx(ctypes.Structure):
+            _fields_ = [('cbSize', w.DWORD), ('rcMonitor', w.RECT), ('rcWork', w.RECT), ('dwFlags', w.DWORD),
+                        ('szDevice', w.WCHAR * 32)]
+        found = []
+
+        def add(handle, *_):
+            info = MonitorInfoEx(cbSize=ctypes.sizeof(MonitorInfoEx))
+            self.u.GetMonitorInfoW(handle, ctypes.byref(info))
+            r = info.rcWork
+            found.append({'device': info.szDevice, 'primary': bool(info.dwFlags & 1),
+                          'work': (r.left, r.top, r.right, r.bottom)})
+            return True
+        self.u.EnumDisplayMonitors(None, None, self.u.EnumDisplayMonitors.argtypes[2](add), 0)
+        return sorted(found, key=lambda m: (not m['primary'], m['work'][0])) or [
+            {'device': '', 'primary': True, 'work': self.work_area()}]
+
+    def strip_rect(self):
+        left, _, right, bottom = self.area
+        return left, bottom - self.h, right, bottom
+
     def width(self, kind):
         return len(self.pack['pets'][kind]['frames']['sit'][0]) * self.scale
 
@@ -202,10 +229,19 @@ class PetApp(MenuMixin):
         title = self.title(front)
         in_code = 'Visual Studio Code' in title
         working_in = bool(front) and front != self.hwnd and self.window_class(front) not in DESKTOP
-        screen, area = self.monitor(front) if working_in else (None, self.area)
-        self.fullscreen = working_in and is_fullscreen(self.rect(front), screen, self.window_class(front))
+        screen, front_area = self.monitor(front) if working_in else (None, None)
+        if self.settings['screen'] == 'auto':
+            area = front_area or self.area  # follow you to the monitor you're working on
+        else:
+            area = screen_area(self.settings['screen'], self.monitors())
+        # over a fullscreen video or game on the pets' own monitor, only pets with news show
+        self.fullscreen = front_area == area and is_fullscreen(self.rect(front), screen, self.window_class(front))
         if area != self.area:
-            self.place(area)  # follow you to the monitor you're working on
+            self.place(area)
+        elif max(abs(a - b) for a, b in zip(self.rect(self.hwnd), self.strip_rect())) > 2:
+            # Windows once left it resized but not moved: put it back (2 px of slack for DPI rounding)
+            x0, y0, x1, y1 = self.strip_rect()
+            self.u.SetWindowPos(self.hwnd, -1, x0, y0, x1 - x0, y1 - y0, 0x10)  # HWND_TOPMOST, SWP_NOACTIVATE
         if in_code:  # looking at that project's window counts as having seen its alarm
             for sid, cat in cats.items():
                 if title_matches(title, cat.rec.get('cwd')):

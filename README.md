@@ -11,8 +11,8 @@ Pixel pets that live above your Windows taskbar and tell you when **Claude Code*
 - **One pet per Claude Code session**, from the VS Code extension or the CLI.
 - **While Claude works**, cats chase a ball of yarn, and the Critters, a family of slimes, hop around and use their moves: Water Gun, Ember, Razor Leaf.
 - **When Claude finishes or needs a decision**, the pet hops with a bubble and a little chiptune chime. The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
-- **It stays out of the way.** Pets hide while VS Code is in front and follow you to the monitor you're working on. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
-- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, bigger pets, sound, language, quit.
+- **It stays out of the way.** Pets hide while VS Code is in front. With two monitors you pick which one they live on, or let them follow the window you're in. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
+- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, screen, bigger pets, sound, start with Windows, language, quit.
 - **Each project keeps its pet**, so you can tell sessions apart at a glance.
 
 It speaks English or Vietnamese. You can switch in ⚙ Settings.
@@ -30,7 +30,7 @@ pythonw pet.py           # start it (or: Start Menu → Claude Pet)
 
 `install` adds hook entries to your **global** `~/.claude/settings.json`. It writes a timestamped backup next to that file first and leaves your other hooks alone. The hooks store the absolute paths of this folder and of your Python, so run `install` again if either one moves.
 
-Sessions that were already open keep the hooks they loaded at startup, so open a new Claude Code session. To remove everything, run `python pet.py uninstall`.
+Sessions that were already open keep the hooks they loaded at startup, so open a new Claude Code session. To start the pet whenever you sign in to Windows, tick **Start with Windows** in ⚙ Settings. To remove everything, run `python pet.py uninstall`.
 
 ## Use
 
@@ -40,6 +40,8 @@ Sessions that were already open keep the hooks they loaded at startup, so open a
 | Move a pet | Drag it, then let go |
 | Swap a pet for another one | Right-click it, then **Swap to …** |
 | Switch pack, bigger pets, sound, language, quit | Right-click a pet, then **⚙ Settings** |
+| Put the pets on your other monitor | **⚙ Settings → Screen**: main, second, or follow my window |
+| Start the pet with Windows | **⚙ Settings → Start with Windows** (click again to turn it off) |
 | Switch packs while no pet is visible | `python pet.py pack <name>` (no name lists them) |
 | Start it again after quitting | Start Menu → **Claude Pet** |
 
@@ -81,7 +83,7 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) run `pet.
 
 Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn ba bé slime (bộ Thú nhỏ) nhảy tưng tưng và ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt.
 
-Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet, chọn **⚙ Settings**, rồi bấm **Tiếng Việt**.
+Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet, chọn **⚙ Settings**, rồi bấm **Tiếng Việt**. Cũng trong ⚙: chọn **Màn hình** cho pet (chính, phụ, hoặc tự động theo cửa sổ) và bật/tắt **Tự chạy khi bật máy**.
 
 ## License
 

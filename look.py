@@ -4,11 +4,15 @@ TEXT = {
     'en': {'done': '{name} is done!', 'ask_q': '{name} has a question', 'ask_plan': '{name} wants the plan approved',
            'ask_tool': '{name} wants to use {tool}', 'ask_any': '{name} needs a decision', 'click': 'click {pet} to open it',
            'pets': 'Pets', 'swap': 'Swap to {pet}', 'settings': 'Settings', 'big': 'Bigger pets', 'sound': 'Sound',
-           'quit': 'Quit', 'other_lang': 'Tiếng Việt'},
+           'quit': 'Quit', 'other_lang': 'Tiếng Việt', 'autostart': 'Start with Windows', 'screen': 'Screen',
+           'screen_main': 'Main screen', 'screen_second': 'Second screen', 'screen_n': 'Screen {n}',
+           'screen_auto': 'Follow my window'},
     'vi': {'done': '{name} xong rồi!', 'ask_q': '{name} cần bạn trả lời câu hỏi', 'ask_plan': '{name} cần bạn duyệt plan',
            'ask_tool': '{name} cần bạn duyệt {tool}', 'ask_any': '{name} cần bạn quyết định', 'click': 'bấm vào {pet} để mở',
            'pets': 'Bộ pet', 'swap': 'Đổi sang {pet}', 'settings': 'Cài đặt', 'big': 'Pet to hơn', 'sound': 'Âm thanh',
-           'quit': 'Thoát', 'other_lang': 'English'},
+           'quit': 'Thoát', 'other_lang': 'English', 'autostart': 'Tự chạy khi bật máy', 'screen': 'Màn hình',
+           'screen_main': 'Màn hình chính', 'screen_second': 'Màn hình phụ', 'screen_n': 'Màn hình {n}',
+           'screen_auto': 'Tự động'},
 }
 
 INK, MUTED, PAPER, SHADOW = '#2a2230', '#8a7f8c', '#fffdf7', '#1d1822'
