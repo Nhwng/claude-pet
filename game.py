@@ -26,7 +26,8 @@ REACH = {'slash': 14, 'punch': 22, 'spell': 80, 'arrow': 90}   # ui px from the 
 SHOT_SPEED = {'arrow': 150, 'spell': 110}                       # ui px per second, for the attacks that fly
 BURST_SECS = .35              # a magic orb's burst where it hits
 ORB = ('#5b2aa8', '#a46bff', '#e6d4ff')                         # glow, orb, heart
-BOSS_AT = 26                  # ui px beside the hero
+BOSS_AT = 60                  # ui px from the hero where the boss turns up
+BOSS_SPEED = 22               # ui px per second: it marches, it doesn't scuttle
 MELEE = ('slash', 'punch')    # these run up to a bug; the others shoot from where they stand
 CHARGE_SPEED, PATROL_SPEED = 40, 14   # ui px per second
 PATROL_SPAN = 40              # ui px either side of where a hero was put
@@ -262,10 +263,14 @@ class GameMixin:
             room_right = cat.x + w + BOSS_AT * u + bw <= self.w
             cat.dir = 1 if room_right else -1
             x = cat.x + w + BOSS_AT * u + bw / 2 if room_right else cat.x - BOSS_AT * u - bw / 2
-            cat.boss = {'x': min(max(x, bw / 2), self.w - bw / 2), 't': 0.0, 'hit': None}
-            self.start_swing(cat)
+            cat.boss = {'x': min(max(x, bw / 2), self.w - bw / 2), 't': 0.0, 'hit': None, 'w': bw}
         boss = cat.boss
         boss['t'] += dt
+        gap = boss['x'] - (cat.x + w / 2)
+        if boss['hit'] is None and cat.swing <= 0 and abs(gap) > w / 2 + boss['w'] / 2 + 2 * u:
+            boss['x'] -= (1 if gap > 0 else -1) * BOSS_SPEED * u * dt   # it marches up to the hero...
+        elif boss['hit'] is None and cat.swing <= 0:
+            self.start_swing(cat)                                        # ...who cuts it down
         if self.swing(cat, dt, []) and boss['hit'] is None:
             boss['hit'] = boss['t']
         if boss['hit'] is not None and boss['t'] - boss['hit'] >= self.anim_secs('bosses', 0, 'death') + .4:
@@ -313,10 +318,12 @@ class GameMixin:
             n, fps = self.sprites.frames_in('bosses', 0, anim)
             i = min(int(t * fps), n - 1) if anim == 'death' else int(t * fps)
             f = self.put_sprite('bosses', 0, anim, i, 1 if boss['x'] < center else -1, boss['x'], ground)
+            c.tag_lower(f['item'], cat.item)  # the hero's "done!" bubble stays readable over a big boss
             if boss['hit'] is None:  # its life bar
                 top, half = ground - f['h'] - 3 * u, f['w'] // 2
-                c.create_rectangle(boss['x'] - half, top, boss['x'] + half, top + u, fill='#e5484d', width=0,
-                                   tags=('fx',))
+                bar = c.create_rectangle(boss['x'] - half, top, boss['x'] + half, top + u, fill='#e5484d', width=0,
+                                         tags=('fx',))
+                c.tag_lower(bar, cat.item)  # under the hero and its bubble, which may reach over the boss
         hand_y = ground - self.sprites.body('heroes', cat.kind)[1] * .55
         for shot in cat.shots:
             x, d = int(shot['x']), shot['dir']
@@ -341,9 +348,9 @@ class GameMixin:
     def put_sprite(self, group, index, anim, i, facing, cx, ground):
         """A bug or boss with the middle of its body at cx, feet on the ground."""
         f = self.sprites.frame(group, index, anim, i, facing)
-        self.canvas.create_image(int(cx - f['w'] / 2 + f['dx']), int(ground + f['dy']), image=f['img'], anchor='nw',
-                                 tags=('fx',))
-        return f
+        item = self.canvas.create_image(int(cx - f['w'] / 2 + f['dx']), int(ground + f['dy']), image=f['img'],
+                                        anchor='nw', tags=('fx',))
+        return {**f, 'item': item}  # the cached frame itself stays as it was
 
     def game_extras(self, cat, base, left, right, top, box):
         """Around a hero: its tier's aura and glitter, a campfire while it sleeps, "LEVEL UP!" over its plate."""
