@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
-# your own pet packs stay on your machine
+# your own pet packs stay on your machine; critters.json is original art and ships with the app
 packs/*.json
+!packs/critters.json
