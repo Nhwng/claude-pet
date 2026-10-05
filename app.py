@@ -367,11 +367,11 @@ class PetApp:
         """The bubble or name plate over a pet: built when its words change, otherwise only moved."""
         name, click = Path(cat.rec.get('cwd') or '?').name, f'bấm vào {pet["call"]} để mở'
         if cat.mode == 'done':
-            want = ('done', f'{name} xong rồi!', click)
+            want = ('done', f'{name} xong rồi!', cat.rec.get('ask') or click)
         elif cat.mode == 'waiting':
             detail = cat.rec.get('detail')
             ask = ASK_TOOLS.get(detail) or (f'duyệt {detail}' if detail else 'quyết định')
-            want = ('waiting', f'{name} cần bạn {ask}', click)
+            want = ('waiting', f'{name} cần bạn {ask}', cat.rec.get('ask') or click)
         else:
             want = ('tag', name)
         bottom = top if want[0] != 'tag' else top - self.ui

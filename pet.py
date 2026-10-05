@@ -56,6 +56,43 @@ def next_state(cur, event, payload):
     return cur
 
 
+def plain(value):
+    """Text out of a str, or out of message-like dicts and lists of content blocks."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return '\n'.join(plain(v) for v in value)
+    if isinstance(value, dict):
+        return plain(value.get('text') or value.get('content') or '')
+    return ''
+
+
+def ask_text(payload, limit=56):
+    """One short line for the bubble: what Claude asks you about, or how its last answer starts."""
+    try:
+        args = payload.get('tool_input') if isinstance(payload.get('tool_input'), dict) else {}
+        if payload.get('hook_event_name') == 'Stop':
+            text = plain(payload.get('last_assistant_message'))
+        elif payload.get('tool_name') == 'AskUserQuestion':
+            first = (args.get('questions') or [{}])[0]
+            text = first.get('question', '') if isinstance(first, dict) else ''
+        else:
+            path = args.get('file_path') or args.get('notebook_path')
+            text = args.get('command') or (Path(str(path)).name if path else '') or args.get('url') or ''
+        line = next((s for s in str(text).splitlines() if s.strip(' *_`#>|-')), '')
+        line = ' '.join(re.sub(r'[*_`#>|]+', '', line).split())
+        return line if len(line) <= limit else line[:limit - 1].rstrip() + '…'
+    except Exception:
+        return ''  # an odd payload must never cost us the state change
+
+
+def project_of(payload):
+    """A stable key for a session's project: Claude keeps transcripts in a folder named after the
+    directory it was started in, which (unlike cwd) doesn't change when the session cds around."""
+    transcript = payload.get('transcript_path')
+    return Path(transcript).parent.name.lower() if isinstance(transcript, str) and transcript else ''
+
+
 def read_json(path):
     try:
         return json.loads(path.read_text('utf-8'))
@@ -84,11 +121,15 @@ def handle_event(payload, env=os.environ):
     path = STATE_DIR / f'{sid}.json'
     cur = read_json(path) or {}
     new = next_state(cur.get('state'), payload.get('hook_event_name'), payload)
+    ask = ask_text(payload) if new in ALARMS else ''
     if new is None:
         path.unlink(missing_ok=True)
     elif not (new == cur.get('state') and new in ALARMS):  # repeated alarm keeps its ts, so a seen alarm stays seen
         write_json(path, {'state': new, 'cwd': payload.get('cwd') or cur.get('cwd', ''), 'ts': time.time(),
-                          'detail': payload.get('tool_name', '') if new == 'waiting' else ''})
+                          'project': project_of(payload) or cur.get('project', ''),
+                          'detail': payload.get('tool_name', '') if new == 'waiting' else '', 'ask': ask})
+    elif ask and not cur.get('ask'):  # the same alarm, but now we know what it is about
+        write_json(path, {**cur, 'ask': ask})
 
 
 def log_event(payload):
@@ -98,6 +139,9 @@ def log_event(payload):
     keep = {k: payload.get(k) for k in ('hook_event_name', 'session_id', 'cwd', 'notification_type', 'message', 'tool_name')}
     keep['entrypoint'] = os.environ.get('CLAUDE_CODE_ENTRYPOINT')
     keep['background_tasks'] = payload.get('background_tasks')
+    keep['ask'], keep['project'] = ask_text(payload), project_of(payload)
+    if isinstance(payload.get('tool_input'), dict):
+        keep['tool_input_keys'] = sorted(payload['tool_input'])
     keep['keys'] = sorted(payload)
     with log.open('a', encoding='utf-8') as f:
         f.write(f"{time.strftime('%m-%d %H:%M:%S')} {json.dumps(keep, ensure_ascii=False)}\n")
@@ -219,6 +263,13 @@ def selftest():
     assert next_state('working', 'PreToolUse', {'tool_name': 'AskUserQuestion'}) == 'waiting'
     assert next_state('working', 'PreToolUse', {'tool_name': 'Bash'}) == 'working'
     assert next_state('done', 'SessionEnd', {}) is None
+    stop = {'hook_event_name': 'Stop', 'last_assistant_message': '\n## **Done:** fixed the `login` bug\nmore'}
+    assert ask_text(stop) == 'Done: fixed the login bug'
+    assert ask_text({'hook_event_name': 'Stop', 'last_assistant_message': [{'type': 'text', 'text': 'Hi'}]}) == 'Hi'
+    assert ask_text({'tool_name': 'Edit', 'tool_input': {'file_path': 'C:/code/shop/app.py'}}) == 'app.py'
+    assert ask_text({'tool_name': 'AskUserQuestion', 'tool_input': {'questions': 'oops'}}) == ''
+    assert ask_text({'tool_name': 'Bash', 'tool_input': {'command': 'x' * 80}}).endswith('…')
+    assert len(ask_text({'tool_name': 'Bash', 'tool_input': {'command': 'x' * 80}})) == 56
     now = 100_000.0
     assert mode({'state': 'done', 'ts': now - 5}, 0, now) == 'done'
     assert mode({'state': 'done', 'ts': now - 5}, now - 5, now) == 'idle'
@@ -255,8 +306,15 @@ def selftest():
         done = read_json(path)
         send('Notification', notification_type='idle_prompt')
         assert read_json(path) == done, 'a repeated alarm must keep its timestamp'
-        send('PermissionRequest', tool_name='Bash')
-        assert read_json(path)['detail'] == 'Bash'
+        send('PermissionRequest', tool_name='Bash', tool_input={'command': 'npm test'})
+        assert read_json(path)['detail'] == 'Bash' and read_json(path)['ask'] == 'npm test'
+        send('PostToolUse')
+        send('Notification', notification_type='permission_prompt')       # no text yet...
+        waiting = read_json(path)
+        send('PreToolUse', tool_name='AskUserQuestion', tool_input={'questions': [{'question': 'Ship it?'}]})
+        assert read_json(path) == {**waiting, 'ask': 'Ship it?'}, '...filled in later, same timestamp'
+        send('Stop', transcript_path='C:/u/.claude/projects/C--code-shop/abc.jsonl')
+        assert read_json(path)['project'] == 'c--code-shop'
         send('SessionEnd')
         assert not path.exists()
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
