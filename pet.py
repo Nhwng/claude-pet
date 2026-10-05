@@ -179,13 +179,15 @@ def install(remove=False):
 
 
 def read_config():
+    """{pack, big, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
-    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big'))}
+    picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
+    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'picks': picks}
 
 
 def write_config(**changes):
     STATE_DIR.mkdir(exist_ok=True)
-    write_json(STATE_DIR / CONFIG, {**read_config(), **changes})
+    write_json(STATE_DIR / CONFIG, {**(read_json(STATE_DIR / CONFIG) or {}), **changes})  # keep what we don't touch
 
 
 def choose_pack(key=None):
@@ -222,6 +224,13 @@ def is_title_of(title, name):
 
 def title_matches(title, cwd):
     return any(is_title_of(title, name) for name in folder_names(cwd))
+
+
+def is_fullscreen(rect, screen, window_class):
+    """Does this window cover the whole screen, like a video or a game? A maximized one stops at the taskbar."""
+    left, top, right, bottom = rect
+    return (window_class not in ('Progman', 'WorkerW')  # the desktop itself is screen-sized too
+            and left <= 0 and top <= 0 and right >= screen[0] and bottom >= screen[1])
 
 
 def load_states(now):
@@ -278,6 +287,9 @@ def selftest():
     assert title_matches('● app.py - shop - Visual Studio Code', r'C:\code\shop')
     assert title_matches('shop - Visual Studio Code', r'C:\code\shop\api')
     assert not title_matches('x - shopping - Visual Studio Code', r'C:\code\shop')
+    assert is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Chrome_WidgetWin_1')
+    assert not is_fullscreen((-8, -8, 1928, 1040), (1920, 1080), 'Chrome_WidgetWin_1'), 'maximized is not fullscreen'
+    assert not is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Progman'), 'the desktop is not a video'
     assert {'cats', 'hoenn'} <= set(packs()), packs().keys()
     assert packs()['cats']['working'] == 'walk' and packs()['hoenn']['working'] == 'attack'
     assert all(len(frames) >= 2 for frames in PARTICLES.values()), 'a big frame plus a small one'
@@ -320,10 +332,10 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
-        assert read_config() == {'pack': 'cats', 'big': False}
-        write_config(pack='hoenn')
+        assert read_config() == {'pack': 'cats', 'big': False, 'picks': {}}
+        write_config(pack='hoenn', picks={'hoenn': {'c--code-shop': 'Mudkip'}})
         write_config(big=True)
-        assert read_config() == {'pack': 'hoenn', 'big': True}
+        assert read_config() == {'pack': 'hoenn', 'big': True, 'picks': {'hoenn': {'c--code-shop': 'Mudkip'}}}
         assert load_states(time.time()) == {} and read_config()['pack'] == 'hoenn', 'config is not a session'
     STATE_DIR = real_dir
     print('ok')

@@ -196,6 +196,20 @@ def leaf_frames(turns=8, half=4.3, width=1.8):
                                     for y in range(min(ys), max(ys) + 1)], ring='k'))
     return frames
 
+def yarn_frames(turns=4, radius=3.4):
+    """A ball of yarn whose strands turn as it rolls."""
+    frames = []
+    for i in range(turns):
+        a = math.pi * i / turns
+        rows = [''.join('.' if x * x + y * y > radius * radius else 'h' if (x, y) in ((-1, -2), (-2, -1)) else
+                        'q' if (x * math.cos(a) + y * math.sin(a) + 9) % 2.5 < .9 else 'p' for x in range(-3, 4))
+                for y in range(-3, 4)]
+        frames.append(with_outline(rows, ring='o'))
+    return frames
+
+
+YARN = yarn_frames()
+YARN_COLORS = {'o': '#7a2c45', 'p': '#ff8fb1', 'q': '#d9466f', 'h': '#ffe1ea'}
 PARTICLES = {  # big frames first (they flicker), the small one last (dying ember / splash bit)
     'water': (['..l..', '.lbb.', 'lbbbd', 'bbbbd', '.bdd.'], ['.l.', 'lbd', '.d.'], ['lb', 'bd']),
     'fire': (['..y..', '.yoy.', 'yoooy', 'orrro', 'orRro', '.rRr.'],

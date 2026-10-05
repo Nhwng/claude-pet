@@ -9,9 +9,10 @@ import time
 from pathlib import Path
 
 import pet
-from pet import ALARMS, ASK_TOOLS, folder_names, is_title_of, load_states, mode, read_config, title_matches, write_config
-from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, ZZZ_BIG, ZZZ_SMALL,
-                     packs, with_outline)
+from pet import (ALARMS, ASK_TOOLS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config,
+                 title_matches, write_config)
+from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, YARN, YARN_COLORS,
+                     ZZZ_BIG, ZZZ_SMALL, packs, with_outline)
 
 
 KEY = '#ff00fe'                  # transparent colour key: these pixels are see-through and click-through
@@ -43,6 +44,8 @@ def user32():
     u.GetWindowLongW.argtypes = (w.HWND, ctypes.c_int)
     u.SetWindowLongW.argtypes = (w.HWND, ctypes.c_int, w.LONG)
     u.SetWindowPos.argtypes = (w.HWND, w.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.UINT)
+    u.GetWindowRect.argtypes = (w.HWND, ctypes.c_void_p)
+    u.GetClassNameW.argtypes = (w.HWND, w.LPWSTR, ctypes.c_int)
     return u
 
 
@@ -58,6 +61,7 @@ class Cat:
         self.fx = []                                # particles of the current move
         self.rec, self.mode, self.box, self.moving = {}, 'idle', (0, 0, 0, 0), False
         self.tag, self.item, self.shown, self.decor = f'pet{id(self)}', None, None, None  # its canvas items
+        self.ball, self.swat, self.held = None, 0.0, False  # yarn (cats), pounce timer, being dragged
 
 
 class PetApp:
@@ -74,7 +78,11 @@ class PetApp:
         self.ui = 2 * self.dpi  # bubbles, plates and effects; the pets themselves use self.scale
         self.canvas = tk.Canvas(root, bg=KEY, highlightthickness=0)
         self.canvas.pack()
-        self.canvas.bind('<Button-1>', self.on_click)
+        self.canvas.bind('<ButtonPress-1>', self.on_press)
+        self.canvas.bind('<B1-Motion>', self.on_drag)
+        self.canvas.bind('<ButtonRelease-1>', self.on_release)
+        self.drag, self.fullscreen = None, False
+        self.screen = (self.u.GetSystemMetrics(0), self.u.GetSystemMetrics(1))
         self.canvas.bind('<Button-3>', lambda e: self.open_menu(e.x, e.y))
         self.canvas.bind('<Motion>', self.on_motion)
         self.fonts, self.menu_hits, self.menu_box, self.menu_until, self.menu_sid = {}, None, (0, 0, 0, 0), 0.0, None
@@ -93,7 +101,8 @@ class PetApp:
 
     def apply(self, settings):
         """Use a pet pack and size. Pets are dealt again from the new pack on this poll."""
-        self.settings, self.pack = settings, packs().get(settings['pack']) or packs()['cats']
+        self.pack_key = settings['pack'] if settings['pack'] in packs() else 'cats'
+        self.settings, self.pack = settings, packs()[self.pack_key]
         self.scale = (self.pack['scale'] + settings['big']) * self.dpi
         tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])
         left, _, right, bottom = self.work_area()
@@ -113,6 +122,18 @@ class PetApp:
         r = wintypes.RECT()
         self.u.SystemParametersInfoW(0x30, 0, byref(r), 0)  # SPI_GETWORKAREA: screen minus taskbar
         return r.left, r.top, r.right, r.bottom
+
+    def rect(self, hwnd):
+        from ctypes import byref, wintypes
+        r = wintypes.RECT()
+        self.u.GetWindowRect(hwnd, byref(r))
+        return r.left, r.top, r.right, r.bottom
+
+    def window_class(self, hwnd):
+        import ctypes
+        buf = ctypes.create_unicode_buffer(64)
+        self.u.GetClassNameW(hwnd, buf, 64)
+        return buf.value
 
     def title(self, hwnd):
         import ctypes
@@ -142,21 +163,25 @@ class PetApp:
     def poll(self):
         self.root.after(POLL_MS, self.poll)  # first: an error below costs one poll, not the whole loop
         settings = read_config()
-        if settings != self.settings:
+        if (settings['pack'], settings['big']) != (self.settings['pack'], self.settings['big']):
             self.apply(settings)
+        self.settings = settings  # picks change without dealing the pets again
         now, cats = time.time(), {}
         for sid, rec in load_states(now).items():
             cat = self.cats.get(sid)
             if cat is None:
-                kind = self.free_kind(cats)
+                kind = self.kind_for(rec, cats)
                 cat = Cat(kind, self.free_spot(kind, cats))
             cat.rec = rec
             cats[sid] = cat
         for sid in self.cats.keys() - cats.keys():
             self.canvas.delete(self.cats[sid].tag)
         self.cats = cats
-        title = self.title(self.u.GetForegroundWindow())
+        front = self.u.GetForegroundWindow()
+        title = self.title(front)
         in_code = 'Visual Studio Code' in title
+        self.fullscreen = bool(front) and front != self.hwnd and is_fullscreen(self.rect(front), self.screen,
+                                                                               self.window_class(front))
         if in_code:  # looking at that project's window counts as having seen its alarm
             for sid, cat in cats.items():
                 if title_matches(title, cat.rec.get('cwd')):
@@ -170,6 +195,26 @@ class PetApp:
         others = [c.x for c in (*self.cats.values(), *new_cats.values())]
         tries = [random.uniform(0, self.w - self.width(kind)) for _ in range(12)]
         return max(tries, key=lambda x: min((abs(x - o) for o in others), default=0))
+
+    def kind_for(self, rec, new_cats):
+        """The pet this project already has in this pack, else a free one, which then stays its pet."""
+        names, project = [pet['name'] for pet in self.pack['pets']], self.project(rec)
+        chosen = self.settings['picks'].get(self.pack_key, {}).get(project)
+        if chosen in names:
+            return names.index(chosen)
+        kind = self.free_kind(new_cats)
+        self.remember(project, kind)
+        return kind
+
+    @staticmethod
+    def project(rec):
+        return rec.get('project') or os.path.normcase(rec.get('cwd') or '?')
+
+    def remember(self, project, kind):
+        picks = dict(self.settings['picks'])
+        picks[self.pack_key] = {**picks.get(self.pack_key, {}), project: self.pack['pets'][kind]['name']}
+        self.settings = {**self.settings, 'picks': picks}
+        write_config(picks=picks)
 
     def free_kind(self, new_cats):
         used, kinds = {c.kind for c in (*self.cats.values(), *new_cats.values())}, range(len(self.pack['pets']))
@@ -190,8 +235,13 @@ class PetApp:
                 wall = time.time()
                 for sid, cat in self.cats.items():
                     self.step(sid, cat, wall, dt)
+                    if self.fullscreen and cat.mode not in ALARMS and not cat.held:
+                        self.canvas.delete(cat.tag)  # over a fullscreen video, only pets with news may show
+                        cat.item = cat.decor = None
+                        continue
                     self.draw(cat)
-                    busy = busy or cat.moving or cat.mode == 'working' or cat.y > 0 or cat.vy > 0 or bool(cat.fx)
+                    busy = (busy or cat.moving or cat.mode == 'working' or cat.y > 0 or cat.vy > 0 or bool(cat.fx)
+                            or cat.held)
                 if self.menu_hits is not None:
                     self.close_menu() if now > self.menu_until or self.hide else self.canvas.tag_raise('menu')
             elif self.canvas.find_all():
@@ -205,30 +255,63 @@ class PetApp:
     def step(self, sid, cat, now, dt):
         cat.mode = mode(cat.rec, self.acked.get(sid, 0), now)
         cat.t += dt
+        if cat.mode != 'working':
+            cat.move_t = cat.ball = None
+        if cat.held:  # in your hand: no walking, no falling
+            cat.moving = False
+            self.fly(cat, dt)
+            return
         right = self.w - self.width(cat.kind)
         crowd = self.crowding(cat) if cat.mode in ALARMS and cat.y == 0 else None
-        cat.moving = crowd is not None or cat.mode == 'working' and self.pack['working'] == 'walk'
+        cat.moving = crowd is not None
         if crowd:  # walk away until the bubbles stop overlapping
             cat.dir = 1 if (cat.x, id(cat)) > (crowd.x, id(crowd)) else -1
             cat.x = min(max(cat.x + cat.dir * 18 * self.ui * dt, 0), right)
-        elif cat.moving:
-            cat.x += cat.dir * cat.speed * self.ui * dt
-            if not 0 <= cat.x <= right or random.random() < .04 * dt:
-                cat.dir, cat.x = -cat.dir, min(max(cat.x, 0), right)
+        elif cat.mode == 'working' and self.pack['working'] == 'walk':
+            cat.moving = self.play(cat, dt, right)
         elif cat.mode == 'working':
             self.use_move(cat, dt)
         elif cat.mode in ALARMS:
             if cat.y == 0 and cat.t >= cat.hop_at:
                 cat.vy, cat.hop_at = JUMP_V, cat.t + (1 if cat.mode == 'waiting' else 2)
             self.chime(sid, cat)
-        if cat.mode != 'working':
-            cat.move_t = None
         if cat.y > 0 or cat.vy > 0:
             cat.y += cat.vy * dt
             cat.vy -= GRAVITY * dt
             if cat.y <= 0:
                 cat.y = cat.vy = 0.0
         self.fly(cat, dt)
+
+    def play(self, cat, dt, right):
+        """While Claude works, a cat chases a ball of yarn: trots after it, pounces, bats it away again.
+        Returns whether it is running."""
+        u, w = self.ui, self.width(cat.kind)
+        ball = cat.ball = cat.ball or {'x': min(max(cat.x + w / 2 + cat.dir * 40 * u, 8 * u), self.w - 8 * u),
+                                       'vx': 0.0, 'y': 0.0, 'vy': 0.0, 'roll': 0.0}
+        ball['x'] += ball['vx'] * dt
+        if not 6 * u <= ball['x'] <= self.w - 6 * u:  # bounce off the screen edges
+            ball['x'], ball['vx'] = min(max(ball['x'], 6 * u), self.w - 6 * u), -ball['vx']
+        ball['vx'] *= .3 ** dt                         # and roll to a stop
+        ball['roll'] += abs(ball['vx']) * dt
+        if ball['y'] > 0 or ball['vy'] > 0:
+            ball['y'], ball['vy'] = ball['y'] + ball['vy'] * dt, ball['vy'] - 320 * u * dt
+            if ball['y'] <= 0:
+                ball['y'], ball['vy'] = 0.0, -ball['vy'] * .45 if ball['vy'] < -60 * u else 0.0
+        if cat.swat > 0:
+            cat.swat -= dt
+            return False
+        gap = ball['x'] - (cat.x + (w * .82 if cat.dir > 0 else w * .18))  # from its front paw
+        if abs(gap) > 5 * u:
+            cat.dir = 1 if gap > 0 else -1
+            cat.x = min(max(cat.x + cat.dir * cat.speed * 1.8 * u * dt, 0), right)
+            return True
+        if abs(ball['vx']) < 12 * u:  # caught it: pounce, and bat it away (mostly ahead, never into a wall)
+            away = cat.dir if random.random() < .7 else -cat.dir
+            if not .15 * self.w < ball['x'] < .85 * self.w:
+                away = 1 if ball['x'] < self.w / 2 else -1
+            cat.swat, cat.vy = .35, JUMP_V * .45
+            ball['vx'], ball['vy'] = away * random.uniform(120, 220) * u, random.uniform(40, 110) * u
+        return False
 
     def chime(self, sid, cat):
         """Beep once per alarm, when it is actually on screen."""
@@ -323,12 +406,18 @@ class PetApp:
 
     def pose(self, cat):
         """(frame, lean in sprite px) for this moment."""
+        if cat.held:  # dangling from your cursor
+            return ('stretch' if 'stretch' in self.pack['pets'][cat.kind]['frames'] else 'sit'), 0
         if cat.mode == 'idle':
             return ('sleep2' if int(cat.t / .96) % 2 else 'sleep1'), 0
+        if cat.swat > 0:
+            return 'walk1', 2                                      # pounce on the yarn
         if cat.moving:
             return ('walk1' if int(cat.t / .24) % 2 else 'walk2'), 0
         if cat.mode != 'working':
             return ('sit2' if cat.y > 0 else 'sit'), 0
+        if self.pack['working'] == 'walk':
+            return 'walk2', 0                                      # watching the yarn roll
         t = cat.move_t
         if t is None:
             return ('walk2' if int(cat.t / .4) % 2 else 'walk1'), 0  # a little bounce between moves
@@ -354,6 +443,10 @@ class PetApp:
         for p in cat.fx:
             img = self.art(self.particle_art(p), PARTICLE_COLORS, self.fx_px())
             self.canvas.create_image(int(p['x']), int(base + p['y']), image=img, tags=('fx',))
+        if cat.ball:
+            yarn = YARN[int(cat.ball['roll'] / (4 * self.ui)) % len(YARN)]
+            self.canvas.create_image(int(cat.ball['x']), int(base - cat.ball['y']), anchor='s',
+                                     image=self.art(yarn, YARN_COLORS, self.ui), tags=('fx',))
         top, mid = ground - (im['height'] - im['top']) * s, x0 + int(im['head'] * s)
         left, right = x0 + im['left'] * s, x0 + im['right'] * s
         box = self.decor(cat, pet, mid, top)
@@ -558,6 +651,7 @@ class PetApp:
         cat.kind = self.next_kind(cat)
         cat.x = min(cat.x, self.w - self.width(cat.kind))
         cat.fx, cat.move_t, cat.shown = [], None, None  # new sprite, new plate (its icon), no stale shots
+        self.remember(self.project(cat.rec), cat.kind)      # and the project keeps it
 
     def close_menu(self):
         self.canvas.delete('menu')
@@ -579,7 +673,12 @@ class PetApp:
         elif action.startswith('pack:'):
             write_config(pack=action[5:])
 
-    def on_click(self, event):
+    # --- mouse: click a pet to open its VS Code window, or drag it somewhere else ---
+    def pet_at(self, x, y):
+        return next((sid for sid, c in self.cats.items() if c.box[0] <= x <= c.box[2] and c.box[1] <= y <= c.box[3]),
+                    None)
+
+    def on_press(self, event):
         if self.menu_hits is not None:
             x0, y0, x1, y1 = self.menu_box
             if x0 <= event.x <= x1 and y0 <= event.y <= y1:
@@ -589,12 +688,33 @@ class PetApp:
                     self.menu_action(action)
                 return
             self.close_menu()
-        for sid, cat in self.cats.items():
-            x0, y0, x1, y1 = cat.box
-            if x0 <= event.x <= x1 and y0 <= event.y <= y1:
-                self.acked[sid] = cat.rec.get('ts', 0)
-                self.focus_vscode(cat.rec.get('cwd', ''))
-                return
+        sid = self.pet_at(event.x, event.y)
+        if sid:
+            cat = self.cats[sid]
+            self.drag = {'sid': sid, 'dx': cat.x - event.x, 'y': event.y, 'cat_y': cat.y, 'moved': False}
+
+    def on_drag(self, event):
+        d = self.drag
+        cat = self.cats.get(d['sid']) if d else None
+        if cat is None or not d['moved'] and abs(event.x + d['dx'] - cat.x) + abs(event.y - d['y']) < 5:
+            return  # a wobble is still a click
+        d['moved'], cat.held, cat.vy, cat.move_t, cat.swat = True, True, 0.0, None, 0.0
+        tall = self.image(cat.kind, 'sit', False)['height']
+        cat.x = min(max(event.x + d['dx'], 0), self.w - self.width(cat.kind))
+        cat.y = min(max(d['cat_y'] + (d['y'] - event.y) / self.scale, 0), self.h / self.scale - tall)
+        self.canvas.config(cursor='fleur')
+
+    def on_release(self, event):
+        d, self.drag = self.drag, None
+        cat = self.cats.get(d['sid']) if d else None
+        self.canvas.config(cursor='')
+        if cat is None:
+            return
+        if d['moved']:
+            cat.held = False  # let go: it drops back onto the taskbar right there
+        else:
+            self.acked[d['sid']] = cat.rec.get('ts', 0)
+            self.focus_vscode(cat.rec.get('cwd', ''))
 
 
 def run():
