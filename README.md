@@ -1,17 +1,21 @@
 # Claude Pet
 
+[![test](https://github.com/Nhwng/claude-pet/actions/workflows/test.yml/badge.svg)](https://github.com/Nhwng/claude-pet/actions/workflows/test.yml)
+
 Pixel pets that live above your Windows taskbar and tell you when **Claude Code** is done or needs you, so you can watch YouTube while it works.
 
-![Four cats on the taskbar: one chasing yarn, one saying "blog is done!", one asking to run npm run migrate, one asleep](docs/demo-cats.gif)
+![Critters on the taskbar: Sprig throwing leaves, Bloop using Water Gun, Flicker using Ember, one saying "blog is done!", one asking to run npm run migrate](docs/demo-critters.gif)
+
+![Cats on the taskbar: one chasing yarn, one saying "blog is done!", one asking to run npm run migrate, one asleep](docs/demo-cats.gif)
 
 - **One pet per Claude Code session**, from the VS Code extension or the CLI.
-- **While Claude works**, cats chase a ball of yarn. Pets from a pack can use a move instead (water, fire, leaves).
-- **When Claude finishes or needs a decision**, the pet hops with a bubble and a chime. The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
-- **It stays out of the way.** Pets hide while VS Code is in front. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
-- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it for settings: pet pack, swap this pet, bigger pets, language, quit.
+- **While Claude works**, cats chase a ball of yarn and Critters use their moves: Water Gun, Ember, Razor Leaf.
+- **When Claude finishes or needs a decision**, the pet hops with a bubble and a little chiptune chime. The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
+- **It stays out of the way.** Pets hide while VS Code is in front and follow you to the monitor you're working on. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
+- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, bigger pets, sound, language, quit.
 - **Each project keeps its pet**, so you can tell sessions apart at a glance.
 
-It speaks English or Vietnamese. You can switch in the right-click menu.
+It speaks English or Vietnamese. You can switch in ⚙ Settings.
 
 ## Install
 
@@ -34,13 +38,14 @@ Sessions that were already open keep the hooks they loaded at startup, so open a
 |---|---|
 | Open the session's VS Code window | Click its pet |
 | Move a pet | Drag it, then let go |
-| Switch pet pack, swap a pet, bigger pets, language, quit | Right-click a pet |
+| Swap a pet for another one | Right-click it, then **Swap to …** |
+| Switch pack, bigger pets, sound, language, quit | Right-click a pet, then **⚙ Settings** |
 | Switch packs while no pet is visible | `python pet.py pack <name>` (no name lists them) |
 | Start it again after quitting | Start Menu → **Claude Pet** |
 
 ## Pet packs
 
-Eight cat breeds are built in. To add a pack, put `packs/<name>.json` in this folder, restart the pet, and pick it from the right-click menu.
+Two packs come with it: eight cat breeds, and the three Critters in [`packs/critters.json`](packs/critters.json), which also serve as an example of the format. To add a pack, put `packs/<name>.json` in this folder, restart the pet, and pick it in ⚙ Settings.
 
 ```json
 {
@@ -72,9 +77,9 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) run `pet.
 
 ## Tiếng Việt
 
-Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để cài đặt.
+Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn Critters ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt.
 
-Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet và bấm **Tiếng Việt**.
+Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet, chọn **⚙ Settings**, rồi bấm **Tiếng Việt**.
 
 ## License
 
