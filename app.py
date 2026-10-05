@@ -9,10 +9,19 @@ import time
 from pathlib import Path
 
 import pet
-from pet import (ALARMS, ASK_TOOLS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config,
-                 title_matches, write_config)
+from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, title_matches,
+                 write_config)
 from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, YARN, YARN_COLORS,
-                     ZZZ_BIG, ZZZ_SMALL, packs, with_outline)
+                     ZZZ_BIG, ZZZ_SMALL, packs, tr, with_outline)
+
+TEXT = {  # everything the pet says, in each language it speaks
+    'en': {'done': '{name} is done!', 'ask_q': '{name} has a question', 'ask_plan': '{name} wants the plan approved',
+           'ask_tool': '{name} wants to use {tool}', 'ask_any': '{name} needs a decision', 'click': 'click {pet} to open it',
+           'pets': 'Pets', 'swap': 'Swap to {pet}', 'big': 'Bigger pets', 'quit': 'Quit', 'other_lang': 'Tiếng Việt'},
+    'vi': {'done': '{name} xong rồi!', 'ask_q': '{name} cần bạn trả lời câu hỏi', 'ask_plan': '{name} cần bạn duyệt plan',
+           'ask_tool': '{name} cần bạn duyệt {tool}', 'ask_any': '{name} cần bạn quyết định', 'click': 'bấm vào {pet} để mở',
+           'pets': 'Bộ pet', 'swap': 'Đổi sang {pet}', 'big': 'Pet to hơn', 'quit': 'Thoát', 'other_lang': 'English'},
+}
 
 
 KEY = '#ff00fe'                  # transparent colour key: these pixels are see-through and click-through
@@ -461,13 +470,15 @@ class PetApp:
 
     def decor(self, cat, pet, mid, top):
         """The bubble or name plate over a pet: built when its words change, otherwise only moved."""
-        name, click = Path(cat.rec.get('cwd') or '?').name, f'bấm vào {pet["call"]} để mở'
+        lang = self.settings['lang']
+        text, name = TEXT[lang], Path(cat.rec.get('cwd') or '?').name
+        click = text['click'].format(pet=tr(pet['call'], lang))
         if cat.mode == 'done':
-            want = ('done', f'{name} xong rồi!', cat.rec.get('ask') or click)
+            want = ('done', text['done'].format(name=name), cat.rec.get('ask') or click)
         elif cat.mode == 'waiting':
             detail = cat.rec.get('detail')
-            ask = ASK_TOOLS.get(detail) or (f'duyệt {detail}' if detail else 'quyết định')
-            want = ('waiting', f'{name} cần bạn {ask}', cat.rec.get('ask') or click)
+            line = {'AskUserQuestion': 'ask_q', 'ExitPlanMode': 'ask_plan'}.get(detail, 'ask_tool' if detail else 'ask_any')
+            want = ('waiting', text[line].format(name=name, tool=detail), cat.rec.get('ask') or click)
         else:
             want = ('tag', name)
         bottom = top if want[0] != 'tag' else top - self.ui
@@ -589,23 +600,27 @@ class PetApp:
         """A pixel settings bar at the top of the strip: pet pack, swap the clicked pet, bigger pets, quit."""
         self.close_menu()
         s, packs_now = self.ui, packs()
-        chips = [(f'pack:{key}', pack['name'], pack['pets'][0], key == self.settings['pack'])
+        lang = self.settings['lang']
+        text = TEXT[lang]
+        chips = [(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
                  for key, pack in packs_now.items()]
         self.menu_sid = next((sid for sid, cat in self.cats.items()
                               if cat.box[0] <= x <= cat.box[2] and cat.box[1] <= y <= cat.box[3]), None)
         cat = self.cats.get(self.menu_sid)
         if cat and self.next_kind(cat) != cat.kind:
-            chips.append(('swap', f'Đổi sang {self.pack["pets"][self.next_kind(cat)]["name"]}', 'dice', False))
-        chips += [('big', 'Pet to hơn', 'check', self.settings['big']), ('quit', 'Thoát', None, False)]
+            chips.append(('swap', text['swap'].format(pet=tr(self.pack['pets'][self.next_kind(cat)]['label'], lang)),
+                          'dice', False))
+        chips += [('big', text['big'], 'check', self.settings['big']), ('lang', text['other_lang'], None, False),
+                  ('quit', text['quit'], None, False)]
         sizes = [self.chip_size(text, icon) for _, text, icon, _ in chips]
-        label_w, _ = self.measure('Bộ pet', FONT_TAG)
+        label_w, _ = self.measure(text['pets'], FONT_TAG)
         close_w, _ = self.measure('✕', FONT_TITLE)
         height = max(h for _, h in sizes) + 6 * s
         width = 4 * s + label_w + 3 * s + sum(w + 2 * s for w, _ in sizes) + 2 * s + close_w + 4 * s
         x0, y0 = self.card_x(x, width), 2 * s
         self.canvas.create_image(x0, y0, image=self.card(width, height, INK), anchor='nw', tags=('menu',))
         mid = y0 + height // 2 - s // 2
-        self.canvas.create_text(x0 + 4 * s, mid, text='Bộ pet', font=FONT_TAG, fill=MUTED, anchor='w', tags=('menu',))
+        self.canvas.create_text(x0 + 4 * s, mid, text=text['pets'], font=FONT_TAG, fill=MUTED, anchor='w', tags=('menu',))
         cx, hits = x0 + 4 * s + label_w + 3 * s, []
         for (action, text, icon, on), (w, h) in zip(chips, sizes):
             self.chip(cx, mid - h // 2, w, h, text, icon, on, action == 'quit')
@@ -671,6 +686,8 @@ class PetApp:
             self.root.destroy()
         elif action == 'big':
             write_config(big=not self.settings['big'])
+        elif action == 'lang':
+            write_config(lang='vi' if self.settings['lang'] == 'en' else 'en')
         elif action == 'swap' and self.menu_sid in self.cats:
             self.swap(self.cats[self.menu_sid])
         elif action.startswith('pack:'):

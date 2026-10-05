@@ -134,6 +134,11 @@ def sprite(frame):
     return with_outline(compose(layers))
 
 
+def tr(value, lang):
+    """A name in the chosen language: packs may give {'en': ..., 'vi': ...} or one plain string."""
+    return (value.get(lang) or value.get('en') or next(iter(value.values()), '')) if isinstance(value, dict) else value
+
+
 def mix(color, other, amount):
     a, b = ([int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in (color, other))
     return '#%02x%02x%02x' % tuple(round(x + (y - x) * amount) for x, y in zip(a, b))
@@ -166,6 +171,9 @@ BREEDS = [
           x='#9a6a84', y='#6e4660', j='#8a85a0'),
     breed('Mèo trắng', '#ffffff', w='#ffffff', p='#ffffff', e='#4aa8ff', f='#ffd23f', o='#8a7f92'),
 ]
+CAT_NAMES_EN = {'Mèo cam': 'Orange tabby', 'Mèo mun': 'Black cat', 'Mèo Xiêm': 'Siamese', 'Tam thể': 'Calico',
+                'Mướp xám': 'Grey tabby', 'Anh lông ngắn': 'British Shorthair', 'Bò sữa': 'Tuxedo',
+                'Mèo trắng': 'White cat'}
 
 
 # ---------- moves: what a pack's pets fire while Claude works (sprite px, seconds) ----------
@@ -262,13 +270,15 @@ def move_at(move):
 def packs():
     """{key: {name, scale, pets: [{name, call, colors, frames, icon}]}}; built on first use, never in hooks."""
     cat_frames = {f: sprite(f) for f in FRAMES}
-    found = {'cats': {'name': 'Mèo', 'scale': 2, 'working': 'walk', 'pets': [
-        {'name': name, 'call': 'mèo', 'colors': colors, 'frames': cat_frames, 'icon': with_outline(MINI_CAT, ring='o')}
+    found = {'cats': {'name': {'en': 'Cats', 'vi': 'Mèo'}, 'scale': 2, 'working': 'walk', 'pets': [
+        {'name': name, 'label': {'en': CAT_NAMES_EN[name], 'vi': name}, 'call': {'en': 'the cat', 'vi': 'mèo'},
+         'colors': colors, 'frames': cat_frames, 'icon': with_outline(MINI_CAT, ring='o')}
         for name, colors in BREEDS]}}
     for path in sorted(PACKS_DIR.glob('*.json')):
         try:
             data = json.loads(path.read_text('utf-8'))
-            pets = [{'name': pet['name'], 'call': pet['name'], 'colors': {**pet['colors'], 'g': '#ffffff'},
+            pets = [{'name': pet['name'], 'label': pet.get('label', pet['name']), 'call': pet.get('label', pet['name']),
+                     'colors': {**pet['colors'], 'g': '#ffffff'},
                      'frames': pose_frames(pet['rows'], pet['shut']), 'icon': thumbnail(pet['rows']),
                      'move': move_at(pet.get('move'))} for pet in data['pets']]
             working = 'attack' if all(pet['move'] for pet in pets) else 'walk'

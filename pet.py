@@ -24,7 +24,7 @@ from pathlib import Path
 STATE_DIR = Path.home() / '.claude-pet'
 SETTINGS = Path.home() / '.claude' / 'settings.json'
 CONFIG = 'config.json'    # lives in STATE_DIR next to the session files
-ASK_TOOLS = {'AskUserQuestion': 'trả lời câu hỏi', 'ExitPlanMode': 'duyệt plan'}
+ASK_TOOLS = ('AskUserQuestion', 'ExitPlanMode')  # tools that always mean "Claude needs you"
 HOOK_EVENTS = {'UserPromptSubmit': '*', 'PostToolUse': '*', 'PermissionRequest': '*', 'Notification': '*',
                'PreToolUse': '|'.join(ASK_TOOLS), 'Stop': '*', 'SessionEnd': '*'}
 HOOK_MARK = '/pet.py" hook'  # install writes posix paths; the slash keeps other-pet.py's hooks safe
@@ -206,10 +206,11 @@ def shortcut(remove=False):
 
 
 def read_config():
-    """{pack, big, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
+    """{pack, big, lang, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
     picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
-    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'picks': picks}
+    lang = cfg.get('lang') if cfg.get('lang') in ('en', 'vi') else 'en'
+    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'lang': lang, 'picks': picks}
 
 
 def write_config(**changes):
@@ -217,15 +218,21 @@ def write_config(**changes):
     write_json(STATE_DIR / CONFIG, {**(read_json(STATE_DIR / CONFIG) or {}), **changes})  # keep what we don't touch
 
 
+CLI_TEXT = {'en': ('Switched to {name}; the running pet changes right away.', 'Pet packs:', 'python pet.py pack <name>'),
+            'vi': ('Đã chọn bộ {name}. Pet đang chạy sẽ đổi ngay.', 'Các bộ pet:', 'python pet.py pack <tên>')}
+
+
 def choose_pack(key=None):
-    from sprites import packs
+    from sprites import packs, tr
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    lang = read_config()['lang']
+    switched, listing, usage = CLI_TEXT[lang]
     if key in packs():
         write_config(pack=key)
-        print(f'Đã chọn bộ {packs()[key]["name"]}. Pet đang chạy sẽ đổi ngay.')
+        print(switched.format(name=tr(packs()[key]['name'], lang)))
         return
-    print('Các bộ pet:', ', '.join(f'{k} ({pack["name"]})' for k, pack in packs().items()))
-    print('Đổi bộ: python pet.py pack <tên>')
+    print(listing, ', '.join(f'{k} ({tr(pack["name"], lang)})' for k, pack in packs().items()))
+    print(usage)
 
 
 # ---------- pet side: pure helpers ----------
@@ -317,6 +324,8 @@ def selftest():
     assert is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Chrome_WidgetWin_1')
     assert not is_fullscreen((-8, -8, 1928, 1040), (1920, 1080), 'Chrome_WidgetWin_1'), 'maximized is not fullscreen'
     assert not is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Progman'), 'the desktop is not a video'
+    from app import TEXT
+    assert TEXT['en'].keys() == TEXT['vi'].keys(), 'every line in both languages'
     import sprites
     real_packs_dir = sprites.PACKS_DIR
     with tempfile.TemporaryDirectory() as tmp:  # a sample pack, so this passes on a fresh clone too
@@ -372,10 +381,10 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
-        assert read_config() == {'pack': 'cats', 'big': False, 'picks': {}}
+        assert read_config() == {'pack': 'cats', 'big': False, 'lang': 'en', 'picks': {}}
         write_config(pack='hoenn', picks={'hoenn': {'c--code-shop': 'Mudkip'}})
         write_config(big=True)
-        assert read_config() == {'pack': 'hoenn', 'big': True, 'picks': {'hoenn': {'c--code-shop': 'Mudkip'}}}
+        assert read_config() == {'pack': 'hoenn', 'big': True, 'lang': 'en', 'picks': {'hoenn': {'c--code-shop': 'Mudkip'}}}
         assert load_states(time.time()) == {} and read_config()['pack'] == 'hoenn', 'config is not a session'
     STATE_DIR = real_dir
     print('ok')
