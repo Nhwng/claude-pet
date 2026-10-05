@@ -21,6 +21,7 @@ from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICL
 KEY = '#ff00fe'                  # transparent colour key: these pixels are see-through and click-through
 TICK_MS, IDLE_MS, POLL_MS = 33, 120, 500   # ~30 fps while anything moves, ~8 fps when all is still
 JUMP_V, GRAVITY = 32.0, 54.0     # sprite px per second, and per second squared
+HOP_V, HOP_VX = 24.0, 14.0       # a slime's hop: up and forward, sprite px per second
 ZZZ = ((with_outline(ZZZ_BIG), 0), (with_outline(ZZZ_SMALL), 6))   # (art, phase offset)
 DESKTOP = ('Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd')  # not "where you are working"
 
@@ -58,6 +59,7 @@ class Cat:
         self.rec, self.mode, self.box, self.moving = {}, 'idle', (0, 0, 0, 0), False
         self.tag, self.item, self.shown, self.decor = f'pet{id(self)}', None, None, None  # its canvas items
         self.ball, self.swat, self.held = None, 0.0, False  # yarn (cats), pounce timer, being dragged
+        self.crouch, self.wait = 0.0, random.uniform(.4, 1)  # hoppers: time since landing, and until the next hop
 
 
 class PetApp(MenuMixin):
@@ -347,7 +349,9 @@ class PetApp(MenuMixin):
         """Stand still and use the pet's move every few seconds: wind up, lunge, fire, recover."""
         if cat.move_t is None:
             cat.rest -= dt
-            if cat.rest <= 0:
+            if self.pack['hop']:
+                self.hop(cat, dt)
+            if cat.rest <= 0 and cat.y == cat.vy == 0:  # moves are used from the ground
                 cat.move_t, cat.emit = 0.0, 0.0
                 if random.random() < .3:
                     cat.dir = -cat.dir  # aim the other way now and then
@@ -361,7 +365,22 @@ class PetApp(MenuMixin):
                 cat.emit -= style['every']
                 cat.fx.append(self.shot(cat, move, style))
         if cat.move_t >= MOVE_END:
-            cat.move_t, cat.rest = None, random.uniform(1.2, 2.8)
+            cat.move_t, cat.rest = None, random.uniform(1.2, 2.8) * (2 if self.pack['hop'] else 1)
+
+    def hop(self, cat, dt):
+        """Slimes get about like slimes between moves: sit a moment, squash, spring forward, land with a squish."""
+        right = self.w - self.width(cat.kind)
+        if cat.y > 0 or cat.vy > 0:  # in the air: drift forward; step() does the rising and falling
+            cat.x = min(max(cat.x + cat.dir * HOP_VX * self.scale * dt, 0), right)
+            return
+        cat.crouch += dt
+        if cat.crouch < cat.wait:
+            return
+        if cat.x <= 0 or cat.x >= right:  # turn back at the screen edges, and wander now and then
+            cat.dir = 1 if cat.x <= 0 else -1
+        elif random.random() < .25:
+            cat.dir = -cat.dir
+        cat.vy, cat.crouch, cat.wait = HOP_V, 0.0, random.uniform(.4, 1)
 
     def shot(self, cat, move, style):
         """A new particle leaving the pet's mouth; y is screen px above the ground (negative = up)."""
@@ -441,6 +460,10 @@ class PetApp(MenuMixin):
         if self.pack['working'] == 'walk':
             return 'walk2', 0                                      # watching the yarn roll
         t = cat.move_t
+        if t is None and self.pack['hop']:
+            if cat.y > 0:
+                return ('stretch' if cat.vy > 0 else 'sit'), 0     # up stretched, down round
+            return ('squash' if cat.crouch < .12 or cat.crouch > cat.wait - .15 else 'sit'), 0  # landed / about to spring
         if t is None:
             return ('walk2' if int(cat.t / .4) % 2 else 'walk1'), 0  # a little bounce between moves
         if t < .2:

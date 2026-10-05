@@ -270,7 +270,7 @@ def move_at(move):
 def packs():
     """{key: {name, scale, pets: [{name, call, colors, frames, icon}]}}; built on first use, never in hooks."""
     cat_frames = {f: sprite(f) for f in FRAMES}
-    found = {'cats': {'name': {'en': 'Cats', 'vi': 'Mèo'}, 'scale': 2, 'working': 'walk', 'pets': [
+    found = {'cats': {'name': {'en': 'Cats', 'vi': 'Mèo'}, 'scale': 2, 'working': 'walk', 'hop': False, 'pets': [
         {'name': name, 'label': {'en': CAT_NAMES_EN[name], 'vi': name}, 'call': {'en': 'the cat', 'vi': 'mèo'},
          'colors': colors, 'frames': cat_frames, 'icon': with_outline(MINI_CAT, ring='o')}
         for name, colors in BREEDS]}}
@@ -283,7 +283,8 @@ def packs():
                      'move': move_at(pet.get('move'))} for pet in data['pets']]
             working = 'attack' if all(pet['move'] for pet in pets) else 'walk'
             scale = min(max(int(data.get('scale', 1)), 1), 4)
-            found[path.stem] = {'name': data['name'], 'scale': scale, 'working': working, 'pets': pets}
+            found[path.stem] = {'name': data['name'], 'scale': scale, 'working': working, 'hop': data.get('hop') is True,
+                                'pets': pets}
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             continue  # a broken pack file must not take the cats down with it
     return found

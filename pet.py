@@ -338,12 +338,13 @@ def selftest():
         rows = ['..AAAA..', '.ABBBBA.', 'ABWBBWBA', 'ABBBBBBA', '.AAAAAA.']
         sample = {'name': 'Blob', 'colors': {'A': '#1b1b22', 'B': '#3ab0ff', 'W': '#ffffff'}, 'rows': rows,
                   'shut': rows, 'move': {'name': 'Water Gun', 'kind': 'water', 'mouth': [7, 2]}}
-        Path(tmp, 'sample.json').write_text(json.dumps({'name': 'Sample', 'pets': [sample]}), 'utf-8')
+        Path(tmp, 'sample.json').write_text(json.dumps({'name': 'Sample', 'hop': True, 'pets': [sample]}), 'utf-8')
         Path(tmp, 'broken.json').write_text('{"name": "Broken", "pets": [{"rows": []}]}', 'utf-8')
         sprites.PACKS_DIR = Path(tmp)
         packs.cache_clear()
         assert set(packs()) == {'cats', 'sample'}, 'the broken pack is skipped, not fatal'
         assert packs()['cats']['working'] == 'walk' and packs()['sample']['working'] == 'attack'
+        assert packs()['sample']['hop'] and not packs()['cats']['hop'], 'only packs that ask for it hop'
         checked = packs()
     sprites.PACKS_DIR = real_packs_dir
     packs.cache_clear()
