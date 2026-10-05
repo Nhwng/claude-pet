@@ -11,33 +11,18 @@ from pathlib import Path
 import pet
 from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, title_matches,
                  write_config)
+import sounds
+from look import ALARM_COLORS, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER, SHADOW, TEXT
+from menu import MenuMixin
 from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, YARN, YARN_COLORS,
                      ZZZ_BIG, ZZZ_SMALL, packs, tr, with_outline)
-
-TEXT = {  # everything the pet says, in each language it speaks
-    'en': {'done': '{name} is done!', 'ask_q': '{name} has a question', 'ask_plan': '{name} wants the plan approved',
-           'ask_tool': '{name} wants to use {tool}', 'ask_any': '{name} needs a decision', 'click': 'click {pet} to open it',
-           'pets': 'Pets', 'swap': 'Swap to {pet}', 'big': 'Bigger pets', 'quit': 'Quit', 'other_lang': 'Tiếng Việt'},
-    'vi': {'done': '{name} xong rồi!', 'ask_q': '{name} cần bạn trả lời câu hỏi', 'ask_plan': '{name} cần bạn duyệt plan',
-           'ask_tool': '{name} cần bạn duyệt {tool}', 'ask_any': '{name} cần bạn quyết định', 'click': 'bấm vào {pet} để mở',
-           'pets': 'Bộ pet', 'swap': 'Đổi sang {pet}', 'big': 'Pet to hơn', 'quit': 'Thoát', 'other_lang': 'English'},
-}
 
 
 KEY = '#ff00fe'                  # transparent colour key: these pixels are see-through and click-through
 TICK_MS, IDLE_MS, POLL_MS = 33, 120, 500   # ~30 fps while anything moves, ~8 fps when all is still
 JUMP_V, GRAVITY = 32.0, 54.0     # sprite px per second, and per second squared
-INK, MUTED, PAPER, SHADOW = '#2a2230', '#8a7f8c', '#fffdf7', '#1d1822'
-ALARM_COLORS = {'done': '#2f9e5b', 'waiting': '#e5484d'}
-ICON_COLORS = {kind: {'c': c, 'w': '#ffffff'} for kind, c in ALARM_COLORS.items()}
-ICON_COLORS['box'] = {'c': '#8a7f8c'}
-CHECK_BOX = ['ccccccc', 'c.....c', 'c.....c', 'c.....c', 'c.....c', 'c.....c', 'ccccccc']
-DICE = ['.ccccc.', 'cpppppc', 'cpdpdpc', 'cpppppc', 'cpdpdpc', 'cpppppc', '.ccccc.']
-ICON_COLORS['dice'] = {'c': '#2a2230', 'p': '#ffffff', 'd': '#2a2230'}
-CHIP_LINE, WAIT_INK = '#cfc8d6', '#d6453d'
 ZZZ = ((with_outline(ZZZ_BIG), 0), (with_outline(ZZZ_SMALL), 6))   # (art, phase offset)
-FX_COLORS = {'z': '#6d7fa6', 'g': '#ffffff', 'y': '#ffd84a', 'w': '#ffffff'}
-FONT_TITLE, FONT_SUB, FONT_TAG = ('Segoe UI', 10, 'bold'), ('Segoe UI', 8), ('Segoe UI', 8, 'bold')
+DESKTOP = ('Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd')  # not "where you are working"
 
 
 def user32():
@@ -55,6 +40,8 @@ def user32():
     u.SetWindowPos.argtypes = (w.HWND, w.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.UINT)
     u.GetWindowRect.argtypes = (w.HWND, ctypes.c_void_p)
     u.GetClassNameW.argtypes = (w.HWND, w.LPWSTR, ctypes.c_int)
+    u.MonitorFromWindow.argtypes, u.MonitorFromWindow.restype = (w.HWND, w.DWORD), w.HMONITOR
+    u.GetMonitorInfoW.argtypes = (w.HMONITOR, ctypes.c_void_p)
     return u
 
 
@@ -73,7 +60,7 @@ class Cat:
         self.ball, self.swat, self.held = None, 0.0, False  # yarn (cats), pounce timer, being dragged
 
 
-class PetApp:
+class PetApp(MenuMixin):
     def __init__(self):
         import tkinter as tk
         self.tk, self.u = tk, user32()
@@ -91,10 +78,10 @@ class PetApp:
         self.canvas.bind('<B1-Motion>', self.on_drag)
         self.canvas.bind('<ButtonRelease-1>', self.on_release)
         self.drag, self.fullscreen = None, False
-        self.screen = (self.u.GetSystemMetrics(0), self.u.GetSystemMetrics(1))
         self.canvas.bind('<Button-3>', lambda e: self.open_menu(e.x, e.y))
         self.canvas.bind('<Motion>', self.on_motion)
         self.fonts, self.menu_hits, self.menu_box, self.menu_until, self.menu_sid = {}, None, (0, 0, 0, 0), 0.0, None
+        self.menu_x, self.area = 0, self.work_area()  # the strip sits on this monitor's work area
         self.cats, self.acked, self.sounded, self.images = {}, {}, {}, {}
         self.hide, self.settings = True, None
         self.apply(read_config())
@@ -114,13 +101,33 @@ class PetApp:
         self.settings, self.pack = settings, packs()[self.pack_key]
         self.scale = (self.pack['scale'] + settings['big']) * self.dpi
         tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])
-        left, _, right, bottom = self.work_area()
-        self.w, self.h = right - left, (tallest + 10) * self.scale + 40 * self.ui
-        self.root.geometry(f'{self.w}x{self.h}+{left}+{bottom - self.h}')
-        self.canvas.config(width=self.w, height=self.h)
+        self.h = (tallest + 10) * self.scale + 40 * self.ui
+        self.place(self.area)
         self.canvas.delete('all')
         self.images, self.cats, self.menu_hits = {}, {}, None
         self.drop = float(self.h) if self.hide else 0.0
+
+    def place(self, area):
+        """Put the strip along the bottom of a monitor's work area; pets past its new edge walk back in."""
+        left, _, right, bottom = self.area = area
+        self.w = right - left
+        self.root.geometry(f'{self.w}x{self.h}+{left}+{bottom - self.h}')
+        self.canvas.config(width=self.w, height=self.h)
+        for cat in self.cats.values():
+            cat.x, cat.fx = min(cat.x, self.w - self.width(cat.kind)), []
+            if cat.ball:
+                cat.ball['x'] = min(cat.ball['x'], self.w - 8 * self.ui)
+
+    def monitor(self, hwnd):
+        """(whole monitor, work area) of the screen a window is on, as (left, top, right, bottom)."""
+        import ctypes
+        from ctypes import wintypes as w
+
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [('cbSize', w.DWORD), ('rcMonitor', w.RECT), ('rcWork', w.RECT), ('dwFlags', w.DWORD)]
+        info = MonitorInfo(cbSize=ctypes.sizeof(MonitorInfo))
+        self.u.GetMonitorInfoW(self.u.MonitorFromWindow(hwnd, 2), ctypes.byref(info))  # 2: the nearest one
+        return tuple((r.left, r.top, r.right, r.bottom) for r in (info.rcMonitor, info.rcWork))
 
     def width(self, kind):
         return len(self.pack['pets'][kind]['frames']['sit'][0]) * self.scale
@@ -192,8 +199,11 @@ class PetApp:
         front = self.u.GetForegroundWindow()
         title = self.title(front)
         in_code = 'Visual Studio Code' in title
-        self.fullscreen = bool(front) and front != self.hwnd and is_fullscreen(self.rect(front), self.screen,
-                                                                               self.window_class(front))
+        working_in = bool(front) and front != self.hwnd and self.window_class(front) not in DESKTOP
+        screen, area = self.monitor(front) if working_in else (None, self.area)
+        self.fullscreen = working_in and is_fullscreen(self.rect(front), screen, self.window_class(front))
+        if area != self.area:
+            self.place(area)  # follow you to the monitor you're working on
         if in_code:  # looking at that project's window counts as having seen its alarm
             for sid, cat in cats.items():
                 if title_matches(title, cat.rec.get('cwd')):
@@ -329,9 +339,9 @@ class PetApp:
         """Beep once per alarm, when it is actually on screen."""
         ts = cat.rec.get('ts', 0)
         if self.sounded.get(sid, 0) < ts and self.drop < 1:
-            import winsound
             self.sounded[sid] = ts
-            winsound.MessageBeep(winsound.MB_ICONASTERISK if cat.mode == 'done' else winsound.MB_ICONEXCLAMATION)
+            if self.settings['sound']:
+                sounds.play(cat.mode, pet.STATE_DIR)
 
     def use_move(self, cat, dt):
         """Stand still and use the pet's move every few seconds: wind up, lunge, fire, recover."""
@@ -590,124 +600,14 @@ class PetApp:
                 art = SPARKLE if phase in (1, 2) else TWINKLE
                 self.pixels(x, top + dy * s, art, FX_COLORS, tags=('fx',))
 
-    # --- settings bar: right-click any pet ---
-    def measure(self, text, font):
-        import tkinter.font
-        f = self.fonts.setdefault(font, tkinter.font.Font(root=self.root, font=font))
-        return f.measure(text), f.metrics('linespace')
-
-    def open_menu(self, x, y):
-        """A pixel settings bar at the top of the strip: pet pack, swap the clicked pet, bigger pets, quit."""
-        self.close_menu()
-        s, packs_now = self.ui, packs()
-        lang = self.settings['lang']
-        text = TEXT[lang]
-        chips = [(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
-                 for key, pack in packs_now.items()]
-        self.menu_sid = next((sid for sid, cat in self.cats.items()
-                              if cat.box[0] <= x <= cat.box[2] and cat.box[1] <= y <= cat.box[3]), None)
-        cat = self.cats.get(self.menu_sid)
-        if cat and self.next_kind(cat) != cat.kind:
-            chips.append(('swap', text['swap'].format(pet=tr(self.pack['pets'][self.next_kind(cat)]['label'], lang)),
-                          'dice', False))
-        chips += [('big', text['big'], 'check', self.settings['big']), ('lang', text['other_lang'], None, False),
-                  ('quit', text['quit'], None, False)]
-        sizes = [self.chip_size(text, icon) for _, text, icon, _ in chips]
-        label_w, _ = self.measure(text['pets'], FONT_TAG)
-        close_w, _ = self.measure('✕', FONT_TITLE)
-        height = max(h for _, h in sizes) + 6 * s
-        width = 4 * s + label_w + 3 * s + sum(w + 2 * s for w, _ in sizes) + 2 * s + close_w + 4 * s
-        x0, y0 = self.card_x(x, width), 2 * s
-        self.canvas.create_image(x0, y0, image=self.card(width, height, INK), anchor='nw', tags=('menu',))
-        mid = y0 + height // 2 - s // 2
-        self.canvas.create_text(x0 + 4 * s, mid, text=text['pets'], font=FONT_TAG, fill=MUTED, anchor='w', tags=('menu',))
-        cx, hits = x0 + 4 * s + label_w + 3 * s, []
-        for (action, text, icon, on), (w, h) in zip(chips, sizes):
-            self.chip(cx, mid - h // 2, w, h, text, icon, on, action == 'quit')
-            hits.append((cx, mid - h // 2, cx + w, mid + h // 2, action))
-            cx += w + 2 * s
-        self.canvas.create_text(cx + 2 * s, mid, text='✕', font=FONT_TITLE, fill=MUTED, anchor='w', tags=('menu',))
-        hits.append((cx, y0, x0 + width, y0 + height, 'close'))
-        self.menu_hits, self.menu_box = hits, (x0, y0, x0 + width, y0 + height)
-        self.menu_until = time.monotonic() + 6
-
-    def chip_size(self, text, icon):
-        s, (w, h) = self.ui, self.measure(text, FONT_TAG)
-        iw, ih = self.chip_icon(icon)[2:] if icon else (0, 0)
-        return 3 * s + iw + (2 * s if icon else 0) + w + 3 * s, max(h, ih) + 2 * s
-
-    def chip_icon(self, icon):
-        """(rows, colors, width, height) of a chip's little picture: a pet's face or a checkbox."""
-        if icon in ('check', 'dice'):
-            art = (CHECK_BOX, ICON_COLORS['box']) if icon == 'check' else (DICE, ICON_COLORS['dice'])
-            return (*art, 7 * self.ui, 7 * self.ui)
-        px = self.dpi * (2 if len(icon['icon'][0]) < 10 else 1)
-        return icon['icon'], icon['colors'], len(icon['icon'][0]) * px, len(icon['icon']) * px
-
-    def chip(self, x, y, w, h, text, icon, on, danger):
-        """One button of the settings bar; the chosen one is filled in."""
-        s = self.ui
-        self.canvas.create_image(x, y, image=self.card(w, h, INK if on else CHIP_LINE, paper=INK if on else PAPER),
-                                 anchor='nw', tags=('menu',))
-        tx = x + 3 * s
-        if icon:
-            rows, colors, iw, ih = self.chip_icon(icon)
-            if icon == 'check' and on:
-                rows, colors = ICONS['done'], ICON_COLORS['done']
-            self.pixels(tx, y + (h - ih) // 2, rows, colors, iw // len(rows[0]), tags=('menu',))
-            tx += iw + 2 * s
-        color = PAPER if on else WAIT_INK if danger else INK
-        self.canvas.create_text(tx, y + h // 2, text=text, font=FONT_TAG, fill=color, anchor='w', tags=('menu',))
-
-    def next_kind(self, cat):
-        """The next pet in the pack that nobody else on the strip is, else simply the next one."""
-        n, used = len(self.pack['pets']), {c.kind for c in self.cats.values() if c is not cat}
-        order = [(cat.kind + i) % n for i in range(1, n)]
-        return next((k for k in order if k not in used), order[0] if order else cat.kind)
-
-    def swap(self, cat):
-        cat.kind = self.next_kind(cat)
-        cat.x = min(cat.x, self.w - self.width(cat.kind))
-        cat.fx, cat.move_t, cat.shown = [], None, None  # new sprite, new plate (its icon), no stale shots
-        self.remember(self.project(cat.rec), cat.kind)      # and the project keeps it
-
-    def close_menu(self):
-        self.canvas.delete('menu')
-        self.menu_hits = None
-
-    def on_motion(self, event):
-        x0, y0, x1, y1 = self.menu_box
-        if self.menu_hits is not None and x0 <= event.x <= x1 and y0 <= event.y <= y1:
-            self.menu_until = time.monotonic() + 6  # stays open while the mouse is over it
-
-    def menu_action(self, action):
-        self.close_menu()
-        if action == 'quit':
-            self.root.destroy()
-        elif action == 'big':
-            write_config(big=not self.settings['big'])
-        elif action == 'lang':
-            write_config(lang='vi' if self.settings['lang'] == 'en' else 'en')
-        elif action == 'swap' and self.menu_sid in self.cats:
-            self.swap(self.cats[self.menu_sid])
-        elif action.startswith('pack:'):
-            write_config(pack=action[5:])
-
     # --- mouse: click a pet to open its VS Code window, or drag it somewhere else ---
     def pet_at(self, x, y):
         return next((sid for sid, c in self.cats.items() if c.box[0] <= x <= c.box[2] and c.box[1] <= y <= c.box[3]),
                     None)
 
     def on_press(self, event):
-        if self.menu_hits is not None:
-            x0, y0, x1, y1 = self.menu_box
-            if x0 <= event.x <= x1 and y0 <= event.y <= y1:
-                action = next((a for ax0, ay0, ax1, ay1, a in self.menu_hits
-                               if ax0 <= event.x <= ax1 and ay0 <= event.y <= ay1), None)
-                if action:
-                    self.menu_action(action)
-                return
-            self.close_menu()
+        if self.menu_press(event):
+            return
         sid = self.pet_at(event.x, event.y)
         if sid:
             cat = self.cats[sid]

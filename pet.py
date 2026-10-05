@@ -206,11 +206,12 @@ def shortcut(remove=False):
 
 
 def read_config():
-    """{pack, big, lang, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
+    """{pack, big, sound, lang, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
     picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
     lang = cfg.get('lang') if cfg.get('lang') in ('en', 'vi') else 'en'
-    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'lang': lang, 'picks': picks}
+    return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'sound': cfg.get('sound') is not False,
+            'lang': lang, 'picks': picks}
 
 
 def write_config(**changes):
@@ -260,11 +261,11 @@ def title_matches(title, cwd):
     return any(is_title_of(title, name) for name in folder_names(cwd))
 
 
-def is_fullscreen(rect, screen, window_class):
-    """Does this window cover the whole screen, like a video or a game? A maximized one stops at the taskbar."""
-    left, top, right, bottom = rect
+def is_fullscreen(rect, monitor, window_class):
+    """Does this window cover its whole monitor, like a video or a game? A maximized one stops at the taskbar.
+    Both are (left, top, right, bottom); a second monitor's left or top need not be 0."""
     return (window_class not in ('Progman', 'WorkerW')  # the desktop itself is screen-sized too
-            and left <= 0 and top <= 0 and right >= screen[0] and bottom >= screen[1])
+            and rect[0] <= monitor[0] and rect[1] <= monitor[1] and rect[2] >= monitor[2] and rect[3] >= monitor[3])
 
 
 def load_states(now):
@@ -321,10 +322,15 @@ def selftest():
     assert title_matches('● app.py - shop - Visual Studio Code', r'C:\code\shop')
     assert title_matches('shop - Visual Studio Code', r'C:\code\shop\api')
     assert not title_matches('x - shopping - Visual Studio Code', r'C:\code\shop')
-    assert is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Chrome_WidgetWin_1')
-    assert not is_fullscreen((-8, -8, 1928, 1040), (1920, 1080), 'Chrome_WidgetWin_1'), 'maximized is not fullscreen'
-    assert not is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Progman'), 'the desktop is not a video'
-    from app import TEXT
+    screen, right_screen = (0, 0, 1920, 1080), (1920, 0, 3840, 1080)
+    assert is_fullscreen((0, 0, 1920, 1080), screen, 'Chrome_WidgetWin_1')
+    assert not is_fullscreen((-8, -8, 1928, 1040), screen, 'Chrome_WidgetWin_1'), 'maximized is not fullscreen'
+    assert not is_fullscreen((0, 0, 1920, 1080), screen, 'Progman'), 'the desktop is not a video'
+    assert is_fullscreen((1920, 0, 3840, 1080), right_screen, 'Chrome_WidgetWin_1'), 'fullscreen on a second monitor'
+    assert not is_fullscreen((0, 0, 1920, 1080), right_screen, 'Chrome_WidgetWin_1')
+    from look import TEXT
+    from sounds import CHIMES, notes
+    assert all(notes(kind) for kind in CHIMES) and max(abs(v) for v in notes('done')) < 32767, 'chimes render, no clipping'
     assert TEXT['en'].keys() == TEXT['vi'].keys(), 'every line in both languages'
     import sprites
     real_packs_dir = sprites.PACKS_DIR
@@ -381,10 +387,11 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
-        assert read_config() == {'pack': 'cats', 'big': False, 'lang': 'en', 'picks': {}}
+        assert read_config() == {'pack': 'cats', 'big': False, 'sound': True, 'lang': 'en', 'picks': {}}
         write_config(pack='sample', picks={'sample': {'c--code-shop': 'Blob'}})
         write_config(big=True)
-        assert read_config() == {'pack': 'sample', 'big': True, 'lang': 'en', 'picks': {'sample': {'c--code-shop': 'Blob'}}}
+        assert read_config() == {'pack': 'sample', 'big': True, 'sound': True, 'lang': 'en',
+                                 'picks': {'sample': {'c--code-shop': 'Blob'}}}
         assert load_states(time.time()) == {} and read_config()['pack'] == 'sample', 'config is not a session'
     STATE_DIR = real_dir
     print('ok')
