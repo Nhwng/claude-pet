@@ -52,7 +52,7 @@ class GameMixin:
     def hero_image(self, kind, frame, flip):
         """What app.draw needs for a hero frame named 'anim:i' (anything else means standing still)."""
         anim, _, i = frame.partition(':')
-        anim = anim if anim in cast.ANIMS else 'idle'
+        anim = anim if anim in self.sprites.cast['heroes'][kind]['anims'] else 'idle'
         f = self.sprites.frame('heroes', kind, anim, int(i or 0), -1 if flip else 1)
         return {'img': f['img'], 'anchor': 'nw', 'dx': f['dx'], 'dy': f['dy'], 'top': 0, 'height': f['h'],
                 'head': f['w'] / 2, 'left': 0, 'right': f['w'], 'width': f['w']}
@@ -121,12 +121,17 @@ class GameMixin:
             cat.queue = min(cat.queue + tools - cat.tools, MAX_QUEUE)
         cat.tools = tools
 
+    def start_swing(self, cat):
+        """A blow, picked at random from the hero's attacks so it doesn't repeat itself."""
+        cat.move = random.choice(self.sprites.attacks('heroes', cat.kind))
+        cat.swing = self.anim_secs('heroes', cat.kind, cat.move)
+
     def swing(self, cat, dt, targets):
         """Advance a blow already started; True on the frame it lands (or the arrow leaves)."""
         if cat.swing <= 0:
             return False
-        n, fps = self.sprites.frames_in('heroes', cat.kind, 'attack')
-        land = (self.sprites.cast['heroes'][cat.kind].get('hit', n // 2) + .5) / fps
+        n, fps = self.sprites.frames_in('heroes', cat.kind, cat.move)
+        land = (self.sprites.hit('heroes', cat.kind, cat.move) + .5) / fps
         before = n / fps - cat.swing
         cat.swing = max(0.0, cat.swing - dt)
         return before < land <= n / fps - cat.swing
@@ -151,7 +156,7 @@ class GameMixin:
             target = min(live, key=lambda b: abs(b['x'] - center))
             cat.dir = 1 if target['x'] > center else -1
             if abs(target['x'] - center) - w / 2 - target['w'] / 2 <= REACH[attack] * u:
-                cat.swing = self.anim_secs('heroes', cat.kind, 'attack')
+                self.start_swing(cat)
             elif attack in MELEE and cat.ouch <= 0:  # swords and fists go to the bug, within their own ground
                 if cat.home is None:
                     cat.home = cat.x
@@ -258,7 +263,7 @@ class GameMixin:
             cat.dir = 1 if room_right else -1
             x = cat.x + w + BOSS_AT * u + bw / 2 if room_right else cat.x - BOSS_AT * u - bw / 2
             cat.boss = {'x': min(max(x, bw / 2), self.w - bw / 2), 't': 0.0, 'hit': None}
-            cat.swing = self.anim_secs('heroes', cat.kind, 'attack')
+            self.start_swing(cat)
         boss = cat.boss
         boss['t'] += dt
         if self.swing(cat, dt, []) and boss['hit'] is None:
@@ -275,7 +280,7 @@ class GameMixin:
         if cat.held:
             return at('hurt', 0)
         if cat.swing > 0:
-            return at('attack', self.anim_secs('heroes', cat.kind, 'attack') - cat.swing, once=True)
+            return at(cat.move, self.anim_secs('heroes', cat.kind, cat.move) - cat.swing, once=True)
         if cat.ouch > 0:                                          # a bug got a bite in
             return at('hurt', self.anim_secs('heroes', cat.kind, 'hurt') - cat.ouch, once=True)
         if cat.mode == 'idle':

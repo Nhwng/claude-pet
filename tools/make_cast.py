@@ -13,7 +13,8 @@ Recipe: {"heroes": [...], "bugs": [...], "bosses": [...]}, each character:
 Paths in the recipe and in the cast are relative to the cast file's folder. An anim may set "count" to use only its
 first frames (e.g. a run whose last frames turn back to idle) and "fps". A character may set "faces" ("right" or
 "left") when the guess is wrong, "hit" (the attack frame a blow lands on), and "tone": [contrast, colour, brightness]
-to liven up a dull palette next to the others (e.g. [1.25, 1.4, 1.12]).
+to liven up a dull palette next to the others (e.g. [1.25, 1.4, 1.12]). Besides "attack", a hero may have "attack2",
+"attack3"…: each blow then picks one at random; "hits": {"attack2": 5} sets where one lands when the guess is wrong.
 """
 import json
 import os
@@ -61,18 +62,22 @@ def measure(character, root, out_dir):
         frames_of[name] = frames
         crop = union(f.getbbox() for f in frames)
         anims[name] = {'sheet': os.path.relpath(source, out_dir).replace('\\', '/'), 'w': w, 'h': h,
-                       'n': count, 'fps': spec.get('fps', FPS.get(name, 10)), 'crop': crop}
+                       'n': count, 'fps': spec.get('fps', FPS.get('attack' if name.startswith('attack') else name, 10)),
+                       'crop': crop}
     body = union(f.getbbox() for f in frames_of['idle'])
-    attack = frames_of.get('attack')
-    faces, hit = 'right', 0
-    if attack:
-        reach = union(f.getbbox() for f in attack)
+    faces = 'right'
+    if frames_of.get('attack'):
+        reach = union(f.getbbox() for f in frames_of['attack'])
         faces = 'right' if reach[2] - body[2] >= body[0] - reach[0] else 'left'
-        widths = [(f.getbbox() or (0, 0, 0, 0)) for f in attack]
-        hit = max(range(len(attack)), key=lambda i: (widths[i][2] if faces == 'right' else -widths[i][0]))
     faces = character.get('faces', faces)  # a recipe may say, when the guess from the attack is wrong
-    out = {k: v for k, v in character.items() if k not in ('dir', 'anims')}
-    out.update(anims=anims, body=body, faces=faces, hit=character.get('hit', hit))
+    hits = {}
+    for name, frames in frames_of.items():  # attack, attack2…: the frame reaching furthest is where it lands
+        if name.startswith('attack'):
+            boxes = [(f.getbbox() or (0, 0, 0, 0)) for f in frames]
+            hits[name] = max(range(len(frames)), key=lambda i: boxes[i][2] if faces == 'right' else -boxes[i][0])
+    hits.update(character.get('hits', {}))
+    out = {k: v for k, v in character.items() if k not in ('dir', 'anims', 'hits')}
+    out.update(anims=anims, body=body, faces=faces, hits=hits, hit=character.get('hit', hits.get('attack', 0)))
     return out
 
 

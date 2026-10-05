@@ -23,10 +23,10 @@ def usable(character, base):
     drawn in; and the body's box."""
     try:
         anims = character['anims']
-        return box(character['body']) and all(
-            (base / anims[a]['sheet']).is_file() and box(anims[a]['crop']) and anims[a]['fps'] > 0
-            and anims[a]['n'] > 0 and anims[a]['w'] > 0 and anims[a]['h'] > 0 for a in ANIMS)
-    except (KeyError, TypeError):
+        return box(character['body']) and all(a in anims for a in ANIMS) and all(
+            (base / anim['sheet']).is_file() and box(anim['crop']) and anim['fps'] > 0
+            and anim['n'] > 0 and anim['w'] > 0 and anim['h'] > 0 for anim in anims.values())
+    except (KeyError, TypeError, AttributeError):
         return False
 
 
@@ -67,6 +67,15 @@ class Sprites:
         """How far above the feet anything of this group is ever drawn, in screen px."""
         return max((round((c['body'][3] - a['crop'][1]) * self.scale(group, i))
                     for i, c in enumerate(self.cast[group]) for a in c['anims'].values()), default=0)
+
+    def attacks(self, group, index):
+        """'attack', 'attack2'…: the blows this character can pick from."""
+        return sorted(a for a in self.cast[group][index]['anims'] if a.startswith('attack'))
+
+    def hit(self, group, index, anim):
+        """The frame of an attack where the blow lands (or the shot leaves)."""
+        c = self.cast[group][index]
+        return (c.get('hits') or {}).get(anim, c.get('hit', 0) if anim == 'attack' else c['anims'][anim]['n'] // 2)
 
     def frames_in(self, group, index, anim):
         a = self.cast[group][index]['anims'][anim]
