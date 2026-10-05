@@ -8,11 +8,14 @@ import sys
 import time
 from pathlib import Path
 
+import cast
 import pet
 from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, screen_area,
                  title_matches, write_config)
 import sounds
-from look import ALARM_COLORS, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER, SHADOW, TEXT
+from game import GameMixin
+from look import (ALARM_COLORS, CHIP_LINE, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER,
+                  SHADOW, TEXT, TIER_COLORS, XP_COLOR)
 from menu import MenuMixin
 from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, YARN, YARN_COLORS,
                      ZZZ_BIG, ZZZ_SMALL, packs, tr, with_outline)
@@ -62,9 +65,13 @@ class Cat:
         self.tag, self.item, self.shown, self.decor = f'pet{id(self)}', None, None, None  # its canvas items
         self.ball, self.swat, self.held = None, 0.0, False  # yarn (cats), pounce timer, being dragged
         self.crouch, self.wait = 0.0, random.uniform(.4, 1)  # hoppers: time since landing, and until the next hop
+        self.level, self.tier, self.bar, self.flash = None, 0, 0, 0.0  # Game mode: a hero's level and its fight
+        self.swing, self.spawn, self.queue, self.tools, self.beaten = 0.0, 0.0, 0, None, 0.0
+        self.bugs, self.shots, self.bursts, self.boss = [], [], [], None
+        self.ouch, self.home, self.goal, self.pause, self.stride = 0.0, None, None, 0.0, 1.0  # flinch, patrol
 
 
-class PetApp(MenuMixin):
+class PetApp(GameMixin, MenuMixin):
     def __init__(self):
         import tkinter as tk
         self.tk, self.u = tk, user32()
@@ -88,7 +95,7 @@ class PetApp(MenuMixin):
         self.fonts, self.menu_hits, self.menu_box, self.menu_until, self.menu_sid = {}, None, (0, 0, 0, 0), 0.0, None
         self.menu_x, self.area = 0, self.work_area()  # the strip sits on this monitor's work area
         self.cats, self.acked, self.sounded, self.images = {}, {}, {}, {}
-        self.hide, self.settings = True, None
+        self.hide, self.settings, self.xp, self.sprites = True, None, {}, None
         self.apply(read_config())
         root.update_idletasks()
         self.hwnd = int(root.wm_frame(), 16)
@@ -114,16 +121,34 @@ class PetApp(MenuMixin):
             pass
 
     def apply(self, settings):
-        """Use a pet pack and size. Pets are dealt again from the new pack on this poll."""
-        self.pack_key = settings['pack'] if settings['pack'] in packs() else 'cats'
-        self.settings, self.pack = settings, packs()[self.pack_key]
+        """Use a pet pack and size, or Game mode's cast. Pets are dealt again from it on this poll."""
+        data, base = cast.load() if settings['mode'] == 'game' else ({}, None)
+        self.pack = None
+        if data:
+            try:
+                self.pack = self.hero_pack(data, base)
+                self.sprites.check()  # a sheet tkinter can't read: the pets carry on instead
+                self.pack_key = 'heroes'
+            except (self.tk.TclError, OSError, ValueError):
+                self.report(*sys.exc_info())
+                self.pack = None
+        if self.pack is None:  # Chill mode, or Game mode without a usable cast
+            self.pack_key = settings['pack'] if settings['pack'] in packs() else 'cats'
+            self.pack = packs()[self.pack_key]
+        else:
+            self.start_xp()
         self.canvas.delete('all')
         self.images, self.cats, self.menu_hits = {}, {}, None  # first: the old pets' kinds mean nothing in this pack
-        self.scale = (self.pack['scale'] + settings['big']) * self.dpi
-        tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])
-        self.h = (tallest + 10) * self.scale + 40 * self.ui
+        if self.game:  # the cast's frames come zoomed already: screen px throughout
+            self.scale = 1
+            self.h = max(self.sprites.tallest('heroes'), self.sprites.tallest('bosses')) + 10 * self.dpi + 40 * self.ui
+        else:
+            self.scale = (self.pack['scale'] + settings['big']) * self.dpi
+            tallest = max(len(pet['frames']['sit']) for pet in self.pack['pets'])
+            self.h = (tallest + 10) * self.scale + 40 * self.ui
         self.place(self.area)
         self.drop = float(self.h) if self.hide else 0.0
+        self.settings = settings  # last: if anything above failed, the next poll tries again
 
     def place(self, area):
         """Put the strip along the bottom of a monitor's work area; pets past its new edge walk back in."""
@@ -173,6 +198,8 @@ class PetApp(MenuMixin):
         return left, bottom - self.h, right, bottom
 
     def width(self, kind):
+        if self.game:
+            return self.sprites.body('heroes', kind)[0]
         return len(self.pack['pets'][kind]['frames']['sit'][0]) * self.scale
 
     # --- win32 ---
@@ -225,7 +252,7 @@ class PetApp(MenuMixin):
     def poll(self):
         self.root.after(POLL_MS, self.poll)  # first: an error below costs one poll, not the whole loop
         settings = read_config()
-        if (settings['pack'], settings['big']) != (self.settings['pack'], self.settings['big']):
+        if any(settings[key] != self.settings[key] for key in ('pack', 'big', 'mode')):
             self.apply(settings)
         self.settings = settings  # picks change without dealing the pets again
         now, cats = time.time(), {}
@@ -315,7 +342,8 @@ class PetApp(MenuMixin):
                         continue
                     self.draw(cat)
                     busy = (busy or cat.moving or cat.mode == 'working' or cat.y > 0 or cat.vy > 0 or bool(cat.fx)
-                            or cat.held)
+                            or cat.held or bool(cat.bugs or cat.shots or cat.bursts) or cat.boss is not None
+                            or cat.flash > 0)
                 if self.menu_hits is not None:
                     self.close_menu() if now > self.menu_until or self.hide else self.canvas.tag_raise('menu')
             elif self.canvas.find_all():
@@ -343,12 +371,14 @@ class PetApp(MenuMixin):
             cat.x = min(max(cat.x + cat.dir * 18 * self.ui * dt, 0), right)
         elif cat.mode == 'working' and self.pack['working'] == 'walk':
             cat.moving = self.play(cat, dt, right)
-        elif cat.mode == 'working':
+        elif cat.mode == 'working' and not self.game:
             self.use_move(cat, dt)
         elif cat.mode in ALARMS:
             if cat.y == 0 and cat.t >= cat.hop_at:
                 cat.vy, cat.hop_at = JUMP_V, cat.t + (1 if cat.mode == 'waiting' else 2)
             self.chime(sid, cat)
+        if self.game:
+            self.game_step(cat, dt)
         if cat.y > 0 or cat.vy > 0:
             cat.y += cat.vy * dt
             cat.vy -= GRAVITY * dt
@@ -471,6 +501,8 @@ class PetApp(MenuMixin):
     # --- drawing ---
     def image(self, kind, frame, flip):
         """One pet/frame/direction, built once: the image plus where its head and edges are (sprite px)."""
+        if self.game:
+            return self.hero_image(kind, frame, flip)
         key = (kind, frame, flip)
         if key not in self.images:
             pet = self.pack['pets'][kind]
@@ -497,6 +529,8 @@ class PetApp(MenuMixin):
 
     def pose(self, cat):
         """(frame, lean in sprite px) for this moment."""
+        if self.game:
+            return self.game_pose(cat)
         if cat.held:  # dangling from your cursor
             return ('stretch' if 'stretch' in self.pack['pets'][cat.kind]['frames'] else 'sit'), 0
         if cat.mode == 'idle':
@@ -528,10 +562,11 @@ class PetApp(MenuMixin):
         pet, im = self.pack['pets'][cat.kind], self.image(cat.kind, frame, cat.dir < 0)
         x0, base = int(cat.x + lean * cat.dir * s), self.h + self.drop
         ground = int(base - cat.y * s)
+        at = (x0 + im.get('dx', 0), ground + im.get('dy', 0))  # a hero's frame has room around its body
         if cat.item is None:
-            cat.item = self.canvas.create_image(x0, ground, image=im['img'], anchor='sw', tags=(cat.tag,))
+            cat.item = self.canvas.create_image(*at, image=im['img'], anchor=im.get('anchor', 'sw'), tags=(cat.tag,))
         else:
-            self.canvas.coords(cat.item, x0, ground)
+            self.canvas.coords(cat.item, *at)
             if cat.shown is not im['img']:
                 self.canvas.itemconfig(cat.item, image=im['img'])
         cat.shown = im['img']
@@ -545,6 +580,9 @@ class PetApp(MenuMixin):
         top, mid = ground - (im['height'] - im['top']) * s, x0 + int(im['head'] * s)
         left, right = x0 + im['left'] * s, x0 + im['right'] * s
         box = self.decor(cat, pet, mid, top)
+        if self.game:
+            self.draw_battle(cat, base)
+            self.game_extras(cat, base, left, right, top, box)
         if cat.mode == 'done':
             self.sparkles(cat, left, right, top)
         elif cat.mode == 'idle':
@@ -563,7 +601,7 @@ class PetApp(MenuMixin):
             line = {'AskUserQuestion': 'ask_q', 'ExitPlanMode': 'ask_plan'}.get(detail, 'ask_tool' if detail else 'ask_any')
             want = ('waiting', text[line].format(name=name, tool=detail), cat.rec.get('ask') or click)
         else:
-            want = ('tag', name)
+            want = ('tag', f'{name} · Lv {cat.level}', cat.bar, cat.tier) if self.game else ('tag', name)
         bottom = top if want[0] != 'tag' else top - self.ui
         d, key = cat.decor, (*want, cat.kind)
         if d and d['key'] == key:
@@ -575,7 +613,7 @@ class PetApp(MenuMixin):
         tag = f'decor{id(cat)}'
         self.canvas.delete(tag)
         before = set(self.canvas.find_all())
-        box = self.tag(mid, bottom, name, pet) if want[0] == 'tag' else self.bubble(mid, bottom, *want)
+        box = self.tag(mid, bottom, want[1], pet, *want[2:]) if want[0] == 'tag' else self.bubble(mid, bottom, *want)
         for item in set(self.canvas.find_all()) - before:
             self.canvas.addtag_withtag(tag, item)
             self.canvas.addtag_withtag(cat.tag, item)
@@ -643,18 +681,25 @@ class PetApp(MenuMixin):
         c.tag_raise(t2)
         return x0, y0, x0 + width, y1 + 2 * s
 
-    def tag(self, cx, bottom, name, pet):
-        """Little name plate: a tiny picture of this pet and the project folder."""
+    def tag(self, cx, bottom, name, pet, bar=None, tier=0):
+        """Little name plate: a tiny picture of this pet and the project folder. A hero's also has an experience
+        bar along the bottom (bar in 20ths) and a bronze, silver or gold rim for its tier."""
         c, s = self.canvas, self.ui
         face, px = pet['icon'], self.dpi * (2 if len(pet['icon'][0]) < 10 else 1)
         label, w, h = self.text(name, FONT_TAG, INK)
         face_w, face_h = len(face[0]) * px, len(face) * px
-        width, height = 3 * s + face_w + 2 * s + w + 3 * s, max(h, face_h) + 2 * s
+        under = 2 * s if bar is not None else 0
+        width, height = 3 * s + face_w + 2 * s + w + 3 * s, max(h, face_h) + 2 * s + under
         x0, y0 = self.card_x(cx, width), bottom - height
-        c.create_image(x0, y0, image=self.card(width, height, pet['colors'].get('o', INK)), anchor='nw')
-        self.pixels(x0 + 3 * s, y0 + (height - face_h) // 2, face, pet['colors'], px)
-        c.move(label, x0 + 3 * s + face_w + 2 * s, y0 + (height - h) // 2)
+        rim = TIER_COLORS[tier] or pet['colors'].get('o', INK)
+        c.create_image(x0, y0, image=self.card(width, height, rim), anchor='nw')
+        self.pixels(x0 + 3 * s, y0 + (height - under - face_h) // 2, face, pet['colors'], px)
+        c.move(label, x0 + 3 * s + face_w + 2 * s, y0 + (height - under - h) // 2)
         c.tag_raise(label)
+        if bar is not None:
+            left, right, y = x0 + 3 * s, x0 + width - 3 * s, y0 + height - 3 * s
+            c.create_rectangle(left, y, right, y + s, fill=CHIP_LINE, width=0)
+            c.create_rectangle(left, y, left + (right - left) * bar // 20, y + s, fill=XP_COLOR, width=0)
         return x0, y0, x0 + width, bottom
 
     def zzz(self, cat, x, y):
@@ -704,7 +749,7 @@ class PetApp(MenuMixin):
         if cat is None:
             return
         if d['moved']:
-            cat.held = False  # let go: it drops back onto the taskbar right there
+            cat.held, cat.home, cat.goal = False, None, None  # let go: it drops back onto the taskbar right there
         else:
             self.acked[d['sid']] = cat.rec.get('ts', 0)
             self.focus_vscode(cat.rec.get('cwd', ''))

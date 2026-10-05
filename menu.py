@@ -2,6 +2,7 @@
 import threading
 import time
 
+import cast
 from look import CHECK_BOX, CHIP_LINE, DICE, FONT_TAG, FONT_TITLE, GEAR, ICON_COLORS, INK, MUTED, PAPER, TEXT, WAIT_INK
 from pet import STARTUP_LINK, shortcut, write_config
 from sprites import ICONS, packs, tr
@@ -27,12 +28,18 @@ class MenuMixin:
         self.show_bar([row])
 
     def open_settings(self):
-        """⚙: which pack, which screen, bigger pets, sound, start with Windows, language, quit."""
+        """⚙: Chill or Game, which pack, which screen, bigger pets, sound, start with Windows, language, quit."""
         lang = self.settings['lang']
         text = TEXT[lang]
-        rows = [[(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
-                 for key, pack in packs().items()]]
-        labels = [text['pets']]
+        rows, labels = [], []
+        if self.game or cast.load()[0]:  # Game mode needs a cast (artists' packs you download): no cast, no row
+            rows.append([('mode:chill', text['mode_chill'], None, not self.game),
+                         ('mode:game', text['mode_game'], None, self.game)])
+            labels.append(text['mode'])
+        if not self.game:  # heroes are Game mode's own cast
+            rows.append([(f'pack:{key}', tr(pack['name'], lang), pack['pets'][0], key == self.settings['pack'])
+                         for key, pack in packs().items()])
+            labels.append(text['pets'])
         monitors = self.monitors()
         if len(monitors) > 1:
             names = [text['screen_main']] + ([text['screen_second']] if len(monitors) == 2 else
@@ -157,6 +164,8 @@ class MenuMixin:
             self.swap(self.cats[self.menu_sid])
         elif action.startswith('pack:'):
             write_config(pack=action[5:])
+        elif action.startswith('mode:'):
+            write_config(mode=action[5:])
         elif action.startswith('screen:'):
             write_config(screen=action[7:])
         elif action == 'autostart':  # PowerShell makes the shortcut in about a second: don't freeze the pets for it

@@ -23,7 +23,8 @@ from pathlib import Path
 
 STATE_DIR = Path.home() / '.claude-pet'
 SETTINGS = Path.home() / '.claude' / 'settings.json'
-CONFIG = 'config.json'    # lives in STATE_DIR next to the session files
+CONFIG, GAME = 'config.json', 'game.json'   # live in STATE_DIR next to the session files
+RESERVED = (CONFIG, GAME)                   # names a session file must never take
 ASK_TOOLS = ('AskUserQuestion', 'ExitPlanMode')  # tools that always mean "Claude needs you"
 HOOK_EVENTS = {'UserPromptSubmit': '*', 'PostToolUse': '*', 'PermissionRequest': '*', 'Notification': '*',
                'PreToolUse': '|'.join(ASK_TOOLS), 'Stop': '*', 'SessionEnd': '*'}
@@ -121,8 +122,8 @@ def handle_event(payload, env=os.environ):
     # entrypoint=claude-vscode, so the entrypoint alone can't tell.
     if not sid or env.get('CLAUDE_CODE_ENTRYPOINT', '').startswith('sdk') or 'ECC_SKIP_OBSERVE' in env:
         return
-    if f'{sid}.json'.lower() == CONFIG:
-        return  # a session named "config" must not overwrite the settings
+    if f'{sid}.json'.lower() in RESERVED:
+        return  # a session named "config" or "game" must not overwrite those files
     path = STATE_DIR / f'{sid}.json'
     cur = read_json(path) or {}
     new = next_state(cur.get('state'), payload.get('hook_event_name'), payload)
@@ -132,7 +133,9 @@ def handle_event(payload, env=os.environ):
     elif not (new == cur.get('state') and new in ALARMS):  # repeated alarm keeps its ts, so a seen alarm stays seen
         write_json(path, {'state': new, 'cwd': payload.get('cwd') or cur.get('cwd', ''), 'ts': time.time(),
                           'project': project_of(payload) or cur.get('project', ''),
-                          'detail': payload.get('tool_name', '') if new == 'waiting' else '', 'ask': ask})
+                          'detail': payload.get('tool_name', '') if new == 'waiting' else '', 'ask': ask,
+                          'tools': (cur.get('tools') if isinstance(cur.get('tools'), int) else 0)
+                                   + (payload.get('hook_event_name') == 'PostToolUse')})
     elif ask and not cur.get('ask'):  # the same alarm, but now we know what it is about
         write_json(path, {**cur, 'ask': ask})
 
@@ -213,13 +216,15 @@ def shortcut(remove=False, link=START_LINK):
 
 
 def read_config():
-    """{pack, big, sound, lang, screen, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet.
+    """{pack, big, sound, lang, screen, mode, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet.
+    mode: 'chill' (pets) or 'game' (heroes fighting bugs).
     screen: 'main', 'auto' (follow the window you're in) or a monitor's device name."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
     picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
     lang = cfg.get('lang') if cfg.get('lang') in ('en', 'vi') else 'en'
     return {'pack': cfg.get('pack', 'cats'), 'big': bool(cfg.get('big')), 'sound': cfg.get('sound') is not False,
-            'lang': lang, 'screen': cfg.get('screen') if isinstance(cfg.get('screen'), str) else 'main', 'picks': picks}
+            'lang': lang, 'screen': cfg.get('screen') if isinstance(cfg.get('screen'), str) else 'main',
+            'mode': cfg.get('mode') if cfg.get('mode') in ('chill', 'game') else 'chill', 'picks': picks}
 
 
 def write_config(**changes):
@@ -286,7 +291,7 @@ def screen_area(choice, monitors):
 def load_states(now):
     states = {}
     for path in STATE_DIR.glob('*.json'):
-        if path.name == CONFIG:
+        if path.name.lower() in RESERVED:
             continue
         rec = read_json(path)
         if not isinstance(rec, dict) or not isinstance(rec.get('ts', 0), (int, float)):
@@ -380,6 +385,55 @@ def selftest():
             for frame, rows in pet['frames'].items():
                 assert all(len(r) == len(rows[0]) for r in rows), (pet['name'], frame)
                 assert set(''.join(rows + pet['icon'])) - {'.'} <= set(pet['colors']), (pet['name'], frame)
+    import xp
+    assert [xp.level_of(t) for t in (0, 19_999, 20_000, 320_000, 1_620_000, 7_220_000, 192_080_000, 10 ** 12)] == \
+        [1, 1, 2, 5, 10, 20, 99, 99]
+    assert xp.progress(0) == 0 and abs(xp.progress(30_000) - 1 / 6) < 1e-9 and xp.progress(10 ** 12) == 1.0
+    assert [xp.tier_of(lv) for lv in (1, 9, 10, 24, 25, 49, 50, 99)] == [0, 0, 1, 1, 2, 2, 3, 3]
+
+    def reply(rid, out):
+        return json.dumps({'type': 'assistant', 'message': {'id': rid, 'usage': {'output_tokens': out}}}) + '\n'
+
+    def add(path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a', encoding='utf-8') as f:
+            f.write(text)
+    with tempfile.TemporaryDirectory() as tmp:
+        root, log = Path(tmp), Path(tmp, 'C--code-Shop', 's1.jsonl')
+        add(log, reply('old', 500))
+        store = xp.scan(None, root)
+        assert store['tokens'] == {}, 'what Claude wrote before Game mode is history: everyone starts at Lv 1'
+        half = reply('h', 7)
+        add(log, reply('a', 100) + reply('a', 150) + '{"type": "user"}\n' + reply('b', 40) + reply('a', 150)
+            + 'not json\n' + half[:20])
+        store = xp.scan(store, root)
+        assert store['tokens'] == {'c--code-shop': 190}, 'a reply counts once, at its largest; half a line waits'
+        add(log, half[20:] + reply(None, 10))
+        add(Path(tmp, 'C--code-Shop', 's1', 'subagents', 'x.jsonl'), reply('s', 3))
+        store = xp.scan(store, root)
+        assert store['tokens'] == {'c--code-shop': 210}, 'the rest of that line, a reply with no id, a new file'
+        log.write_text(reply('z', 1), 'utf-8')
+        assert xp.scan(store, root)['tokens'] == {'c--code-shop': 210}, 'a file cut short adds nothing'
+        assert xp.scan({'tokens': 'junk', 'files': 'junk'}, root)['tokens'] == {}, 'a broken store starts over'
+    import cast
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, 'Idle.png').write_bytes(b'png')
+        anim = {'sheet': 'Idle.png', 'w': 32, 'h': 32, 'n': 4, 'fps': 8, 'crop': [0, 0, 32, 32]}
+        hero = {'key': 'k', 'name': 'K', 'body': [4, 2, 20, 32], 'anims': {a: anim for a in cast.ANIMS}}
+        lame = {**hero, 'anims': {'idle': anim}}
+        Path(tmp, 'broken.json').write_text('{', 'utf-8')
+        Path(tmp, 'cast.json').write_text(json.dumps({'heroes': [hero, lame], 'bugs': [hero]}), 'utf-8')
+        found, base = cast.load([Path(tmp, 'missing.json'), Path(tmp, 'broken.json'), Path(tmp, 'cast.json')])
+        assert base == Path(tmp) and [h['key'] for h in found['heroes']] == ['k'] and found['bosses'] == [], \
+            'the first usable cast file; characters missing an animation are left out'
+        assert cast.load([Path(tmp, 'broken.json')]) == ({}, None), 'no cast: Game mode waits'
+        Path(tmp, 'odd.json').write_text(json.dumps({'heroes': [hero], 'bugs': 5, 'bosses': [{**hero, 'body': 'x'}]}))
+        odd, _ = cast.load([Path(tmp, 'odd.json')])
+        assert odd['bugs'] == [] and odd['bosses'] == [], 'a malformed group or box is left out, not fatal'
+        assert cast.load([Path(tmp, 'odd.json')]) and not cast.usable({**hero, 'anims': {
+            **hero['anims'], 'run': {**anim, 'fps': 0}}}, Path(tmp)), 'an animation needs a speed'
+    gained, recent = xp.count(b''.join(reply(f'r{i}', 1).encode() for i in range(xp.RECENT + 50)), {})
+    assert gained == xp.RECENT + 50 and len(recent) == xp.RECENT, 'remembered ids stay bounded'
     real_dir = STATE_DIR
     with tempfile.TemporaryDirectory() as tmp:
         STATE_DIR = Path(tmp)
@@ -390,6 +444,9 @@ def selftest():
 
         send('UserPromptSubmit')
         assert read_json(path)['state'] == 'working'
+        send('PostToolUse')
+        send('PostToolUse')
+        assert read_json(path)['tools'] == 2, 'each tool call counts once (a bug in Game mode)'
         send('Stop')
         done = read_json(path)
         send('Notification', notification_type='idle_prompt')
@@ -408,12 +465,20 @@ def selftest():
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'
-        assert read_config() == {'pack': 'cats', 'big': False, 'sound': True, 'lang': 'en', 'screen': 'main', 'picks': {}}
+        assert read_config() == {'pack': 'cats', 'big': False, 'sound': True, 'lang': 'en', 'screen': 'main',
+                                 'mode': 'chill', 'picks': {}}
         write_config(pack='sample', picks={'sample': {'c--code-shop': 'Blob'}})
         write_config(big=True)
         assert read_config() == {'pack': 'sample', 'big': True, 'sound': True, 'lang': 'en', 'screen': 'main',
-                                 'picks': {'sample': {'c--code-shop': 'Blob'}}}
+                                 'mode': 'chill', 'picks': {'sample': {'c--code-shop': 'Blob'}}}
         assert load_states(time.time()) == {} and read_config()['pack'] == 'sample', 'config is not a session'
+        write_json(STATE_DIR / 'game.json', {'tokens': {'c--code-shop': 5}, 'files': {}})
+        handle_event({'session_id': 'GAME', 'hook_event_name': 'Stop', 'cwd': 'D:/x'}, env={})
+        assert load_states(time.time()) == {} and read_json(STATE_DIR / 'game.json')['tokens'], 'game.json is no session'
+        write_config(mode='game')
+        assert read_config()['mode'] == 'game'
+        write_config(mode='bogus')
+        assert read_config()['mode'] == 'chill'
     STATE_DIR = real_dir
     print('ok')
 
