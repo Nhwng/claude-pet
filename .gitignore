@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# Pokémon sprites are game art: keep them on your machine, never in the repo
+packs/hoenn.json
