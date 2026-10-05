@@ -18,7 +18,7 @@ The bubbles and menus are in Vietnamese for now.
 You need Windows 10 or 11, [Claude Code](https://claude.com/claude-code), and Python 3.10+ with tkinter. Both the python.org installer and Anaconda include tkinter.
 
 ```bash
-git clone https://github.com/<you>/claude-pet
+git clone https://github.com/Nhwng/claude-pet
 cd claude-pet
 python pet.py install    # hooks + a "Claude Pet" Start Menu shortcut
 pythonw pet.py           # start it (or: Start Menu → Claude Pet)
