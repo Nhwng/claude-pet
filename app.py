@@ -69,7 +69,7 @@ class Cat:
         self.swing, self.spawn, self.queue, self.tools, self.beaten = 0.0, 0.0, 0, None, 0.0
         self.bugs, self.shots, self.bursts, self.boss = [], [], [], None
         self.ouch, self.home, self.goal, self.pause, self.stride = 0.0, None, None, 0.0, 1.0  # flinch, patrol
-        self.move = 'attack'                                # which of its attacks the hero is swinging
+        self.move, self.shake = 'attack', 0.0              # which of its attacks it swings; a boss kill's shake
 
 
 class PetApp(GameMixin, MenuMixin):

@@ -13,7 +13,8 @@ import cast
 import pet
 import sounds
 import xp
-from look import (CLASS_ICON_COLORS, CLASS_ICONS, FONT_TAG, FX_COLORS, INK, PAPER, TEXT, TIER_COLORS, XP_COLOR)
+from look import (CLASS_ICON_COLORS, CLASS_ICONS, FONT_TAG, FONT_TITLE, FX_COLORS, INK, PAPER, TEXT, TIER_COLORS,
+                  XP_COLOR)
 from sprites import SPARKLE, TWINKLE
 
 SCAN_SECS = 5                 # how often Claude's transcripts are read for new tokens
@@ -24,8 +25,12 @@ SPAWN_AT = (55, 95)           # ui px in front of the hero
 BUG_SPEED = 30                # ui px per second
 REACH = {'slash': 14, 'punch': 22, 'spell': 80, 'arrow': 90}   # ui px from the hero's side to a bug it can hit
 SHOT_SPEED = {'arrow': 150, 'spell': 110}                       # ui px per second, for the attacks that fly
-BURST_SECS = .35              # a magic orb's burst where it hits
+BURST_LIFE = {'spell': .35, 'arrow': .35, 'spark': .16, 'big': .45, 'pop': .8}  # seconds each effect lasts
+CRIT_CHANCE = .15             # a blow's number shows big and gold now and then (it's only for show)
+SHAKE_SECS = .35              # the boss's last blow shakes it and the hero
 ORB = ('#5b2aa8', '#a46bff', '#e6d4ff')                         # glow, orb, heart
+SPARK = ('#ffffff', '#ffd23f')                                   # a blow's spark, a crit's number
+RAYS = ((1, 0), (0, 1), (-1, 0), (0, -1), (.7, .7), (-.7, .7), (.7, -.7), (-.7, -.7))
 BOSS_AT = 45                  # ui px from the hero where the boss turns up
 BOSS_SPEED = 26               # ui px per second: it marches, it does not scuttle
 BUG_HP, BOSS_HP = (1, 2, 2, 3), 3   # blows it takes (a bug's is picked from these)
@@ -97,7 +102,7 @@ class GameMixin:
             if self.settings['sound'] and self.drop < 1:
                 sounds.play('levelup', pet.STATE_DIR)
         cat.level, cat.tier, cat.bar = level, xp.tier_of(level), int(xp.progress(tokens) * 20)
-        cat.flash = max(0.0, cat.flash - dt)
+        cat.flash, cat.shake = max(0.0, cat.flash - dt), max(0.0, cat.shake - dt)
         self.count_tools(cat)
         for bug in cat.bugs:
             bug['t'] += dt
@@ -244,6 +249,7 @@ class GameMixin:
     def damage(self, cat, bug):
         """One blow: off comes a hit point, and the bug reels back (its hurt frames, pushed away) or goes down."""
         bug['hp'] -= 1
+        self.impact(cat, bug['x'], self.sprites.body('bugs', bug['kind'])[1] * .6)
         if bug['hp'] <= 0:
             bug['hit'] = bug['t']
             return
@@ -263,7 +269,18 @@ class GameMixin:
             elif 0 <= shot['x'] <= self.w and shot['age'] < 2:
                 flying.append(shot)
         cat.shots = flying
-        cat.bursts = [{**b, 't': b['t'] + dt} for b in cat.bursts if b['t'] + dt < BURST_SECS]
+        cat.bursts = [{**b, 't': b['t'] + dt} for b in cat.bursts if b['t'] + dt < BURST_LIFE[b['kind']]]
+
+    def impact(self, cat, x, height, boss=False, kill=False):
+        """What a blow looks like where it lands: a spark, and a number flying up (big and gold on a crit). The
+        numbers are only for show; bugs count blows. The boss's last blow gets a big spark and a shake."""
+        crit = random.random() < CRIT_CHANCE
+        hit = (random.randint(6, 12) + (cat.level or 1) // 3) * (random.choice((2, 3)) if crit else 1) * (3 if boss else 1)
+        cat.bursts.append({'x': x, 'h': height, 't': 0.0, 'kind': 'big' if kill else 'spark'})
+        cat.bursts.append({'x': x + random.uniform(-4, 4) * self.ui, 'h': height + 6 * self.ui, 't': 0.0, 'kind': 'pop',
+                           'text': f'{hit}!' if crit else str(hit), 'crit': crit})
+        if kill:
+            cat.shake = SHAKE_SECS
 
     def finish(self, cat, dt):
         """Claude is done: this task's boss walks up beside the hero and goes down to one blow; the rest flee."""
@@ -295,6 +312,7 @@ class GameMixin:
             self.start_swing(cat)                                        # ...who cuts it down, blow by blow
         if self.swing(cat, dt) and boss['hit'] is None and boss['near']:
             boss['hp'] -= 1
+            self.impact(cat, boss['x'], self.sprites.body('bosses', 0)[1] * .6, boss=True, kill=boss['hp'] <= 0)
             if boss['hp'] <= 0:
                 boss['hit'] = boss['t']
             else:
@@ -304,7 +322,11 @@ class GameMixin:
             cat.boss, cat.beaten, cat.swing = None, ts, 0.0
 
     def game_pose(self, cat):
-        """(frame 'anim:i', lean) for a hero."""
+        """(frame 'anim:i', lean) for a hero, jittering for a moment after it beats a boss."""
+        frame, lean = self.hero_pose(cat)
+        return frame, (random.choice((-2, -1, 1, 2)) * self.dpi if cat.shake > 0 else lean)
+
+    def hero_pose(self, cat):
         def at(anim, t, once=False):
             n, fps = self.sprites.frames_in('heroes', cat.kind, anim)
             i = int(t * fps)
@@ -317,9 +339,7 @@ class GameMixin:
             return at('hurt', self.anim_secs('heroes', cat.kind, 'hurt') - cat.ouch, once=True)
         if cat.mode == 'idle':
             return 'idle:0', 0                                    # dozing by the fire
-        if cat.moving:
-            return at('run', cat.t * cat.stride)                  # a stroll takes slower steps than a charge
-        return at('idle', cat.t)
+        return at('run', cat.t * cat.stride) if cat.moving else at('idle', cat.t)  # a stroll steps slower
 
     # --- drawing (all tag 'fx': redrawn every frame) ---
     def draw_battle(self, cat, base):
@@ -369,13 +389,40 @@ class GameMixin:
             else:
                 c.create_line(x - d * 7 * u, hand_y, x, hand_y, fill='#7a4a24', width=u, tags=('fx',))
                 c.create_line(x, hand_y, x - d * 2 * u, hand_y - u, fill='#e9eef7', width=u, tags=('fx',))
-        for burst in cat.bursts:  # where an orb hit: sparks flying out
-            spread, y = (2 + burst['t'] / BURST_SECS * 10) * u, hand_y
-            for k in range(8):
-                dx, dy = (1, 0, -1, 0, .7, -.7, .7, -.7)[k], (0, 1, 0, -1, .7, .7, -.7, -.7)[k]
-                px, py = burst['x'] + dx * spread, y + dy * spread
-                c.create_rectangle(px - u, py - u, px + u, py + u, fill=ORB[2] if k % 2 else ORB[1], width=0,
-                                   tags=('fx',))
+        for burst in cat.bursts:
+            if burst['kind'] in SHOT_SPEED:  # where an orb hit: sparks flying out
+                spread, y = (2 + burst['t'] / BURST_LIFE[burst['kind']] * 10) * u, hand_y
+                for k in range(8):
+                    dx, dy = RAYS[k]
+                    px, py = burst['x'] + dx * spread, y + dy * spread
+                    c.create_rectangle(px - u, py - u, px + u, py + u, fill=ORB[2] if k % 2 else ORB[1], width=0,
+                                       tags=('fx',))
+            elif burst['kind'] == 'pop':
+                self.hit_number(burst, ground)
+            else:
+                self.hit_spark(burst, ground)
+
+    def hit_spark(self, burst, ground):
+        """A star of light where a blow lands, flaring out and gone in a few frames; bigger for the boss's end."""
+        c, u = self.canvas, self.ui
+        k = burst['t'] / BURST_LIFE[burst['kind']]
+        size = (3 + 7 * k) * u * (2 if burst['kind'] == 'big' else 1)
+        x, y = burst['x'], ground - burst['h']
+        for n, (dx, dy) in enumerate(RAYS):
+            reach = size if n < 4 else size * .6
+            c.create_line(x + dx * reach * .3, y + dy * reach * .3, x + dx * reach, y + dy * reach,
+                          fill=SPARK[n % 2], width=u, tags=('fx',))
+        c.create_rectangle(x - u, y - u, x + u, y + u, fill=SPARK[0], width=0, tags=('fx',))
+
+    def hit_number(self, burst, ground):
+        """A number flying up off a blow, with a dark edge so it reads on any screen."""
+        c, u = self.canvas, self.ui
+        k = burst['t'] / BURST_LIFE['pop']
+        x, y = burst['x'], ground - burst['h'] - (k * 16 - (k * 4) ** 2 * .3) * u   # up fast, then slower
+        font, color = (FONT_TITLE, SPARK[1]) if burst['crit'] else (FONT_TAG, PAPER)
+        for dx, dy in ((-1, -1), (1, 1)):  # two shadows are enough to read it, and cheap every frame
+            c.create_text(x + dx, y + dy, text=burst['text'], font=font, fill=INK, tags=('fx',))
+        c.create_text(x, y, text=burst['text'], font=font, fill=color, tags=('fx',))
 
     def put_sprite(self, group, index, anim, i, facing, cx, ground):
         """A bug or boss with the middle of its body at cx, feet on the ground."""
