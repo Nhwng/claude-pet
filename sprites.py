@@ -272,7 +272,8 @@ def packs():
                      'frames': pose_frames(pet['rows'], pet['shut']), 'icon': thumbnail(pet['rows']),
                      'move': move_at(pet.get('move'))} for pet in data['pets']]
             working = 'attack' if all(pet['move'] for pet in pets) else 'walk'
-            found[path.stem] = {'name': data['name'], 'scale': int(data.get('scale', 1)), 'working': working, 'pets': pets}
-        except (OSError, ValueError, KeyError, TypeError):
+            scale = min(max(int(data.get('scale', 1)), 1), 4)
+            found[path.stem] = {'name': data['name'], 'scale': scale, 'working': working, 'pets': pets}
+        except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             continue  # a broken pack file must not take the cats down with it
     return found

@@ -155,9 +155,12 @@ class PetApp:
                         self.u.ShowWindow(hwnd, 9)  # SW_RESTORE
                     self.u.SetForegroundWindow(hwnd)
                     return
+        # Start Code.exe itself, next to the bin\code.cmd on PATH: a .cmd would run through cmd.exe,
+        # where a folder named like "R&D" could smuggle in a second command.
         code = shutil.which('code')
-        if code and os.path.isdir(cwd):
-            subprocess.Popen([code, cwd], creationflags=subprocess.CREATE_NO_WINDOW)
+        exe = Path(code).resolve().parent.parent / 'Code.exe' if code else None
+        if exe and exe.is_file() and os.path.isdir(cwd) and not cwd.startswith('-'):
+            subprocess.Popen([str(exe), cwd], creationflags=subprocess.CREATE_NO_WINDOW)
 
     # --- loop ---
     def poll(self):

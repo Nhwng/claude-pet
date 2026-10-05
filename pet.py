@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Claude Pet: pixel cats on your taskbar that tell you when Claude Code is done or needs you.
+"""Claude Pet: pixel pets above your taskbar that tell you when Claude Code is done or needs you.
 
-    python pet.py            run the cats (pythonw pet.py = no console window)
     python pet.py install    add the hooks to ~/.claude/settings.json (backup written next to it)
-    python pet.py uninstall  remove them
-    python pet.py pack [key] list the pet packs, or switch the running pet to one (e.g. hoenn)
+                             and a "Claude Pet" Start Menu shortcut
+    python pet.py            run the pets (pythonw pet.py = no console window)
+    python pet.py uninstall  remove the hooks and the shortcut
+    python pet.py pack [key] list the pet packs, or switch the running pet to one
     python pet.py hook       what Claude Code runs on each event (JSON on stdin)
     python pet.py test       self-check
 
-Every Claude session gets its own pet: a cat breed, or one from packs/*.json (right-click to switch).
-It trots while Claude works, sits up and hops with a bubble when Claude is done or needs a decision,
-and naps otherwise. The cats hide while VS Code is in
-front; click a cat to jump to its VS Code window, right-click to quit.
+Every Claude session gets its own pet: a cat breed, or one from packs/*.json. While Claude works the
+cats chase yarn (or a pack's pets use their moves); when Claude is done or needs a decision the pet
+hops with a bubble saying what about; otherwise it naps. Pets hide while VS Code is in front.
+Click a pet to jump to its VS Code window, drag it to move it, right-click it for settings.
 """
 import json
 import os
@@ -26,7 +27,7 @@ CONFIG = 'config.json'    # lives in STATE_DIR next to the session files
 ASK_TOOLS = {'AskUserQuestion': 'trả lời câu hỏi', 'ExitPlanMode': 'duyệt plan'}
 HOOK_EVENTS = {'UserPromptSubmit': '*', 'PostToolUse': '*', 'PermissionRequest': '*', 'Notification': '*',
                'PreToolUse': '|'.join(ASK_TOOLS), 'Stop': '*', 'SessionEnd': '*'}
-HOOK_MARK = 'pet.py" hook'
+HOOK_MARK = '/pet.py" hook'  # install writes posix paths; the slash keeps other-pet.py's hooks safe
 ALARMS = ('done', 'waiting')
 STALE_SECS = 15 * 60      # 'working' with no event this long: probably interrupted (Esc fires no Stop)
 FORGET_SECS = 6 * 3600    # VS Code can close without SessionEnd
@@ -118,6 +119,8 @@ def handle_event(payload, env=os.environ):
     # entrypoint=claude-vscode, so the entrypoint alone can't tell.
     if not sid or env.get('CLAUDE_CODE_ENTRYPOINT', '').startswith('sdk') or 'ECC_SKIP_OBSERVE' in env:
         return
+    if f'{sid}.json'.lower() == CONFIG:
+        return  # a session named "config" must not overwrite the settings
     path = STATE_DIR / f'{sid}.json'
     cur = read_json(path) or {}
     new = next_state(cur.get('state'), payload.get('hook_event_name'), payload)
@@ -136,9 +139,10 @@ def log_event(payload):
     log = STATE_DIR / 'events.log'
     if log.exists() and log.stat().st_size > LOG_MAX:
         log.replace(log.with_suffix('.log.old'))
-    keep = {k: payload.get(k) for k in ('hook_event_name', 'session_id', 'cwd', 'notification_type', 'message', 'tool_name')}
+    keep = {k: payload.get(k) for k in ('hook_event_name', 'session_id', 'cwd', 'notification_type', 'tool_name')}
+    keep['message'] = str(payload.get('message') or '')[:120]
     keep['entrypoint'] = os.environ.get('CLAUDE_CODE_ENTRYPOINT')
-    keep['background_tasks'] = payload.get('background_tasks')
+    keep['background_tasks'] = [t.get('type') for t in payload.get('background_tasks') or [] if isinstance(t, dict)]
     keep['ask'], keep['project'] = ask_text(payload), project_of(payload)
     if isinstance(payload.get('tool_input'), dict):
         keep['tool_input_keys'] = sorted(payload['tool_input'])
@@ -159,10 +163,13 @@ def run_hook():
 
 
 def install(remove=False):
-    raw = SETTINGS.read_text('utf-8') if SETTINGS.exists() else '{}'
-    settings = json.loads(raw)
+    SETTINGS.parent.mkdir(exist_ok=True)
+    raw = SETTINGS.read_text('utf-8-sig') if SETTINGS.exists() else '{}'
+    settings = json.loads(raw)  # unreadable settings: stop here, before touching anything
     backup = SETTINGS.with_name(f'settings.json.pet-backup-{time.strftime("%Y%m%d-%H%M%S")}')
     backup.write_text(raw, 'utf-8')
+    for old in sorted(SETTINGS.parent.glob('settings.json.pet-backup-*'))[:-3]:
+        old.unlink()  # keep the three newest
     # `|| exit 0`: if pet.py is ever moved, python exits 2, which would block every prompt and Stop
     command = f'"{Path(sys.executable).as_posix()}" "{Path(__file__).resolve().as_posix()}" hook || exit 0'
     hooks = dict(settings.get('hooks', {}))
@@ -174,8 +181,28 @@ def install(remove=False):
         hooks[event] = groups
         if not groups:
             del hooks[event]
-    SETTINGS.write_text(json.dumps({**settings, 'hooks': hooks}, indent=2, ensure_ascii=False) + '\n', 'utf-8')
+    tmp = SETTINGS.with_name('settings.json.pet-tmp')
+    tmp.write_text(json.dumps({**settings, 'hooks': hooks}, indent=2, ensure_ascii=False) + '\n', 'utf-8')
+    os.replace(tmp, SETTINGS)  # all or nothing: a crash can't leave half a settings file
     print(f'{"Removed" if remove else "Installed"} Claude Pet hooks in {SETTINGS} (backup: {backup.name})')
+    shortcut(remove)
+
+
+def shortcut(remove=False):
+    """The Start Menu entry that starts the pet (paths go through env vars, so any folder name is fine)."""
+    import subprocess
+    link = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs' / 'Claude Pet.lnk'
+    if remove:
+        link.unlink(missing_ok=True)
+        return
+    here = Path(__file__).resolve().parent
+    env = {**os.environ, 'PET_LINK': str(link), 'PET_PYTHONW': str(Path(sys.executable).with_name('pythonw.exe')),
+           'PET_SCRIPT': f'"{here / "pet.py"}"', 'PET_DIR': str(here), 'PET_ICON': f'{here / "pet.ico"},0'}
+    script = ('$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:PET_LINK); $s.TargetPath = $env:PET_PYTHONW; '
+              '$s.Arguments = $env:PET_SCRIPT; $s.WorkingDirectory = $env:PET_DIR; $s.IconLocation = $env:PET_ICON; $s.Save()')
+    powershell = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'
+    done = subprocess.run([str(powershell), '-NoProfile', '-Command', script], env=env, capture_output=True).returncode == 0
+    print(f'Start Menu shortcut: {link}' if done else 'Could not create the Start Menu shortcut (start it with pythonw pet.py)')
 
 
 def read_config():
@@ -239,8 +266,8 @@ def load_states(now):
         if path.name == CONFIG:
             continue
         rec = read_json(path)
-        if rec is None:
-            continue  # mid-write; next poll gets it
+        if not isinstance(rec, dict) or not isinstance(rec.get('ts', 0), (int, float)):
+            continue  # mid-write (next poll gets it) or not ours
         if now - rec.get('ts', 0) > FORGET_SECS:
             path.unlink(missing_ok=True)
             continue
@@ -290,10 +317,23 @@ def selftest():
     assert is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Chrome_WidgetWin_1')
     assert not is_fullscreen((-8, -8, 1928, 1040), (1920, 1080), 'Chrome_WidgetWin_1'), 'maximized is not fullscreen'
     assert not is_fullscreen((0, 0, 1920, 1080), (1920, 1080), 'Progman'), 'the desktop is not a video'
-    assert {'cats', 'hoenn'} <= set(packs()), packs().keys()
-    assert packs()['cats']['working'] == 'walk' and packs()['hoenn']['working'] == 'attack'
+    import sprites
+    real_packs_dir = sprites.PACKS_DIR
+    with tempfile.TemporaryDirectory() as tmp:  # a sample pack, so this passes on a fresh clone too
+        rows = ['..AAAA..', '.ABBBBA.', 'ABWBBWBA', 'ABBBBBBA', '.AAAAAA.']
+        sample = {'name': 'Blob', 'colors': {'A': '#1b1b22', 'B': '#3ab0ff', 'W': '#ffffff'}, 'rows': rows,
+                  'shut': rows, 'move': {'name': 'Water Gun', 'kind': 'water', 'mouth': [7, 2]}}
+        Path(tmp, 'sample.json').write_text(json.dumps({'name': 'Sample', 'pets': [sample]}), 'utf-8')
+        Path(tmp, 'broken.json').write_text('{"name": "Broken", "pets": [{"rows": []}]}', 'utf-8')
+        sprites.PACKS_DIR = Path(tmp)
+        packs.cache_clear()
+        assert set(packs()) == {'cats', 'sample'}, 'the broken pack is skipped, not fatal'
+        assert packs()['cats']['working'] == 'walk' and packs()['sample']['working'] == 'attack'
+        checked = packs()
+    sprites.PACKS_DIR = real_packs_dir
+    packs.cache_clear()
     assert all(len(frames) >= 2 for frames in PARTICLES.values()), 'a big frame plus a small one'
-    for key, pack in packs().items():
+    for key, pack in checked.items():
         for pet in pack['pets']:
             sizes = {(len(rows), len(rows[0])) for rows in pet['frames'].values()}
             assert set(FRAMES) <= set(pet['frames']) and len(sizes) == 1, (key, pet['name'], sizes)
