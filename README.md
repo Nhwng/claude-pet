@@ -4,12 +4,12 @@
 
 Pixel pets that live above your Windows taskbar and tell you when **Claude Code** is done or needs you, so you can watch YouTube while it works.
 
-![Critters on the taskbar: Sprig throwing leaves, Bloop using Water Gun, Flicker using Ember, one saying "blog is done!", one asking to run npm run migrate](docs/demo-critters.gif)
+![Three slimes on the taskbar hopping and using Water Gun, Ember and Razor Leaf, one saying "blog is done!", one asking to run npm run migrate](docs/demo-critters.gif)
 
 ![Cats on the taskbar: one chasing yarn, one saying "blog is done!", one asking to run npm run migrate, one asleep](docs/demo-cats.gif)
 
 - **One pet per Claude Code session**, from the VS Code extension or the CLI.
-- **While Claude works**, cats chase a ball of yarn and Critters use their moves: Water Gun, Ember, Razor Leaf.
+- **While Claude works**, cats chase a ball of yarn, and the Critters, a family of slimes, hop around and use their moves: Water Gun, Ember, Razor Leaf.
 - **When Claude finishes or needs a decision**, the pet hops with a bubble and a little chiptune chime. The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
 - **It stays out of the way.** Pets hide while VS Code is in front and follow you to the monitor you're working on. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
 - **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, bigger pets, sound, language, quit.
@@ -45,12 +45,13 @@ Sessions that were already open keep the hooks they loaded at startup, so open a
 
 ## Pet packs
 
-Two packs come with it: eight cat breeds, and the three Critters in [`packs/critters.json`](packs/critters.json), which also serve as an example of the format. To add a pack, put `packs/<name>.json` in this folder, restart the pet, and pick it in ⚙ Settings.
+Two packs come with it: eight cat breeds, and the three Critter slimes in [`packs/critters.json`](packs/critters.json), which also serve as an example of the format. To add a pack, put `packs/<name>.json` in this folder, restart the pet, and pick it in ⚙ Settings.
 
 ```json
 {
   "name": "My pack",
   "scale": 1,
+  "hop": true,
   "pets": [{
     "name": "Blob",
     "about": "One line about it",
@@ -65,6 +66,7 @@ Two packs come with it: eight cat breeds, and the three Critters in [`packs/crit
 - **`rows`** is the pixel art, facing right. Each letter is a colour from `colors`, and `.` is transparent. Don't use the letters `g` or `v`.
 - **`shut`** is the same sprite with its eyes closed, used for sleeping.
 - **`move`** is optional. `kind` is `water`, `fire` or `leaf`, and `mouth` is the `[x, y]` pixel the shots come out of. If every pet in a pack has a move, the pets stand and use it while Claude works. Otherwise they walk.
+- **`hop`** is optional. Set it to `true` and pets with moves hop around like slimes between moves: squash, spring, land.
 - **`tools/grid_to_pack.py`** turns pixel-grid images, like cross-stitch charts, into a pack. It needs Pillow. Only make and share packs from art you have the rights to.
 
 ## How it works
@@ -77,7 +79,7 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) run `pet.
 
 ## Tiếng Việt
 
-Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn Critters ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt.
+Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn ba bé slime (bộ Thú nhỏ) nhảy tưng tưng và ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt.
 
 Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet, chọn **⚙ Settings**, rồi bấm **Tiếng Việt**.
 
