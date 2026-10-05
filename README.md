@@ -88,7 +88,7 @@ Game mode draws artists' sprite sheets, which you download yourself (their licen
 3. Make the cast file (this one step needs Pillow): `pip install pillow`, then `python tools/make_cast.py packs/cast-recipe.json packs/cast.json`.
 4. Restart the pet, then **⚙ Settings → Mode → Game**.
 
-The recipe can use any packs with sprite strips (one row of frames per animation): give each character `idle`, `run`, `attack`, `hurt` and `death`, a `scale` (1, 1.5, 2…) and, for heroes, an `attack` of `slash`, `punch`, `spell` or `arrow`. `make_cast.py` works out frame counts, where the body stands, which way it faces and when a blow lands.
+The recipe can use any packs with sprite strips (one row of frames per animation): give each character `idle`, `run`, `attack` (and `attack2`, `attack3`… to vary its blows), `hurt` and `death`, a `height` in screen pixels (packs drawn at different sizes come out alike: small art is enlarged with Scale2x, big art scaled down smoothly) and, for heroes, an `attack` of `slash`, `punch`, `spell` or `arrow`. `tone` livens up a dull palette. `make_cast.py` works out frame counts, where the body stands, which way it faces and when a blow lands.
 
 Art in the cast above: Hero Knight 2, Wizard Pack and Monsters Creatures Fantasy by [LuizMelo](https://luizmelo.itch.io/); Elf Fighter Female by Chet ([Pixel Magic](https://pixel-magic.itch.io/)). Thank you!
 
