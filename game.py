@@ -89,7 +89,8 @@ class GameMixin:
         path = pet.STATE_DIR / pet.GAME
         saved = pet.read_json(path)
         saved = saved if isinstance(saved, dict) else {}
-        every = saved['all'] if isinstance(saved.get('all'), dict) else {'files': {}}  # {'files': {}}: from the start
+        every = saved.get('all') if isinstance(saved.get('all'), dict) else {}
+        every = every if isinstance(every.get('files'), dict) else {'files': {}}  # no offsets: from the start
         self.xp, self.kills = ints(saved.get('tokens')), tallies(saved.get('kills'))
         self.written = ints(every['tokens']) if isinstance(every.get('tokens'), dict) else None
 

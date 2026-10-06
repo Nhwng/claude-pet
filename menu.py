@@ -154,7 +154,7 @@ class MenuMixin:
             self.hover, self.hover_at = sid, time.monotonic()
 
     def hover_card(self, now):
-        """The card of the pet under the pointer once it has rested there a moment; gone when the pointer moves
+        """The card of the pet under the pointer, a moment after it got there; gone when the pointer moves
         off the pet (checked here: over click-through pixels the window hears nothing)."""
         cat, m = self.cats.get(self.hover), 4 * self.ui
         x = self.root.winfo_pointerx() - self.root.winfo_rootx()

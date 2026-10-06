@@ -46,7 +46,7 @@ def count(lines, recent):
             continue
         try:
             message = json.loads(line).get('message')
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):  # not JSON, not an object, nested too deep
             continue
         usage = message.get('usage') if isinstance(message, dict) else None
         out = usage.get('output_tokens') if isinstance(usage, dict) else None

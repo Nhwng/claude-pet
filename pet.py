@@ -444,6 +444,11 @@ def selftest():
     assert {cast.pick_boss(bosses, 3) for _ in range(200)} == {0, 1, 2, 3}, 'gold meets them all'
     assert {cast.pick_boss([{'tier': 3}, {'tier': 2}, {'tier': -5}], 0) for _ in range(50)} == {2}, \
         'a tier below 0 counts as 0'
+    from game import tallies
+    from menu import short
+    assert [short(n, 'en') for n in (999, 1234, 999_949, 999_950, 1_268_220)] == \
+        ['999', '1.2k', '999.9k', '1.00M', '1.27M'] and short(1234, 'vi') == '1,2k', 'short token counts'
+    assert tallies({'p': {'bosses': 2, 'bugs': 'x'}, 'q': 'x'}) == {'p': {'bosses': 2}}, 'a hand-edited tally'
     assert {cast.pick_boss([{'tier': 3}, {'tier': 2}], 0) for _ in range(50)} == {1}, 'none unlocked: the lowest'
     gained, recent = xp.count([reply(f'r{i}', 1).encode() for i in range(xp.RECENT + 50)], {})
     assert gained == xp.RECENT + 50 and len(recent) == xp.RECENT, 'remembered ids stay bounded'
