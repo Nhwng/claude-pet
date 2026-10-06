@@ -356,7 +356,7 @@ def selftest():
     assert screen_area('DISPLAY9', monitors) == (0, 0, 1920, 1032), 'an unplugged screen falls back to the main one'
     from look import TEXT
     from sounds import CHIMES, notes
-    assert all(notes(kind) for kind in CHIMES) and max(abs(v) for v in notes('done')) < 32767, 'chimes render, no clipping'
+    assert all(notes(kind) and max(abs(v) for v in notes(kind)) < 32767 for kind in CHIMES), 'chimes render, no clipping'
     assert TEXT['en'].keys() == TEXT['vi'].keys(), 'every line in both languages'
     import sprites
     real_packs_dir = sprites.PACKS_DIR
