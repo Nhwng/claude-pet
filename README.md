@@ -10,9 +10,9 @@ Pixel pets that live above your Windows taskbar and tell you when **Claude Code*
 
 - **One pet per Claude Code session**, from the VS Code extension or the CLI.
 - **While Claude works**, cats chase a ball of yarn, and the Critters, a family of slimes, hop around and use their moves: Water Gun, Ember, Razor Leaf.
-- **When Claude finishes or needs a decision**, the pet hops with a bubble and a little chiptune chime. The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
+- **When Claude finishes or needs a decision**, the pet hops with a bubble and a little chiptune chime, one for done and one for "needs you". These two always sound, even with effect sounds off (to silence them too, turn the pet down in the Windows volume mixer). The bubble shows the question, the command waiting for approval, or the first line of Claude's answer.
 - **It stays out of the way.** Pets hide while VS Code is in front. With two monitors you pick which one they live on, or let them follow the window you're in. Over a fullscreen video only pets with news show up. It never takes keyboard focus, and clicks pass through the empty parts.
-- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, screen, bigger pets, sound, start with Windows, language, quit.
+- **Click** a pet to bring its VS Code window to the front. **Drag** it to move it. **Right-click** it to swap it for another pet, or open **⚙ Settings**: pet pack, screen, bigger pets, effect sounds (Game mode), start with Windows, language, quit.
 - **Each project keeps its pet**, so you can tell sessions apart at a glance.
 - **Rest the pointer on a pet** to see how many tokens Claude has written for its project, all time.
 - **Game mode** (optional): every session is a hero that fights a monster for each tool Claude calls, beats a boss when Claude finishes, and levels up on the tokens Claude writes. See [Game mode](#game-mode).
@@ -41,7 +41,7 @@ Sessions that were already open keep the hooks they loaded at startup, so open a
 | Open the session's VS Code window | Click its pet |
 | Move a pet | Drag it, then let go |
 | Swap a pet for another one | Right-click it, then **Swap to …** |
-| Switch pack, bigger pets, sound, language, quit | Right-click a pet, then **⚙ Settings** |
+| Switch pack, bigger pets, effect sounds, language, quit | Right-click a pet, then **⚙ Settings** |
 | Put the pets on your other monitor | **⚙ Settings → Screen**: main, second, or follow my window |
 | Start the pet with Windows | **⚙ Settings → Start with Windows** (click again to turn it off) |
 | Play Game mode, or go back to Chill | **⚙ Settings → Mode** (shows once you have a cast, see below) |
@@ -104,7 +104,7 @@ Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) run `pet.
 
 ## Tiếng Việt
 
-Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn ba bé slime (bộ Thú nhỏ) nhảy tưng tưng và ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt. Để chuột yên trên pet để xem Claude đã viết bao nhiêu token cho dự án đó từ trước tới giờ (lần chạy đầu pet đọc số token trong toàn bộ transcript ở `~/.claude/projects` một lần, chỉ giữ tổng mỗi dự án, không gửi đi đâu).
+Thú cưng pixel sống trên thanh taskbar. Mỗi phiên Claude Code là một con. Khi Claude đang làm, mèo vờn cuộn len còn ba bé slime (bộ Thú nhỏ) nhảy tưng tưng và ra chiêu. Khi Claude xong việc hoặc cần bạn quyết định, pet nhảy lên kèm bong bóng ghi rõ chuyện gì và một tiếng chiptune riêng cho mỗi loại. Hai tiếng báo này luôn kêu; nút **Âm hiệu ứng** trong ⚙ chỉ tắt âm của game. Bấm vào pet để mở đúng cửa sổ VS Code, kéo để di chuyển, chuột phải để đổi con hoặc mở ⚙ Cài đặt. Để chuột yên trên pet để xem Claude đã viết bao nhiêu token cho dự án đó từ trước tới giờ (lần chạy đầu pet đọc số token trong toàn bộ transcript ở `~/.claude/projects` một lần, chỉ giữ tổng mỗi dự án, không gửi đi đâu).
 
 Cài đặt: `python pet.py install` rồi `pythonw pet.py`, hoặc mở **Claude Pet** trong Start Menu. Muốn dùng tiếng Việt thì chuột phải vào pet, chọn **⚙ Settings**, rồi bấm **Tiếng Việt**. Cũng trong ⚙: chọn **Màn hình** cho pet (chính, phụ, hoặc tự động theo cửa sổ) và bật/tắt **Tự chạy khi bật máy**.
 

@@ -422,12 +422,11 @@ class PetApp(GameMixin, MenuMixin):
         return False
 
     def chime(self, sid, cat):
-        """Beep once per alarm, when it is actually on screen."""
+        """Beep once per alarm, when it is actually on screen. Always: ⚙'s sound switch mutes only the effects."""
         ts = cat.rec.get('ts', 0)
         if self.sounded.get(sid, 0) < ts and self.drop < 1:
             self.sounded[sid] = ts
-            if self.settings['sound']:
-                sounds.play(cat.mode, pet.STATE_DIR)
+            sounds.play(cat.mode, pet.STATE_DIR)
 
     def use_move(self, cat, dt):
         """Stand still and use the pet's move every few seconds: wind up, lunge, fire, recover."""

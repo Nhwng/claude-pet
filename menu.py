@@ -61,9 +61,9 @@ class MenuMixin:
             rows.append([(f'screen:{key}', name, None, key == self.settings['screen']) for key, name in zip(keys, names)]
                         + [('screen:auto', text['screen_auto'], None, self.settings['screen'] == 'auto')])
             labels.append(text['screen'])
-        rows.append([('big', text['big'], 'check', self.settings['big']),
-                     ('sound', text['sound'], 'check', self.settings['sound']),
-                     ('autostart', text['autostart'], 'check', STARTUP_LINK.exists()),
+        rows.append([('big', text['big'], 'check', self.settings['big'])]
+                    + [('sound', text['sound'], 'check', self.settings['sound'])] * self.game  # alerts always sound
+                    + [('autostart', text['autostart'], 'check', STARTUP_LINK.exists()),
                      ('lang', text['other_lang'], None, False), ('quit', text['quit'], None, False)])
         self.show_bar(rows, labels)
 

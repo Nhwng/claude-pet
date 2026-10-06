@@ -218,6 +218,7 @@ def shortcut(remove=False, link=START_LINK):
 def read_config():
     """{pack, big, sound, lang, screen, mode, picks}; picks = {pack: {project: pet name}}, so a project keeps its pet.
     mode: 'chill' (pets) or 'game' (heroes fighting bugs).
+    sound: Game mode's effects (level-up); the done and needs-you chimes always sound.
     screen: 'main', 'auto' (follow the window you're in) or a monitor's device name."""
     cfg = read_json(STATE_DIR / CONFIG) or {}
     picks = cfg.get('picks') if isinstance(cfg.get('picks'), dict) else {}
