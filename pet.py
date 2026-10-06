@@ -412,6 +412,7 @@ def selftest():
         add(Path(tmp, 'C--code-Shop', 's1', 'subagents', 'x.jsonl'), reply('s', 3))
         store = xp.scan(store, root)
         assert store['tokens'] == {'c--code-shop': 210}, 'the rest of that line, a reply with no id, a new file'
+        assert xp.scan({'files': {}}, root)['tokens'] == {'c--code-shop': 710}, 'no offsets: history counts too'
         log.write_text(reply('z', 1), 'utf-8')
         assert xp.scan(store, root)['tokens'] == {'c--code-shop': 210}, 'a file cut short adds nothing'
         assert xp.scan({'tokens': 'junk', 'files': 'junk'}, root)['tokens'] == {}, 'a broken store starts over'
@@ -444,7 +445,7 @@ def selftest():
     assert {cast.pick_boss([{'tier': 3}, {'tier': 2}, {'tier': -5}], 0) for _ in range(50)} == {2}, \
         'a tier below 0 counts as 0'
     assert {cast.pick_boss([{'tier': 3}, {'tier': 2}], 0) for _ in range(50)} == {1}, 'none unlocked: the lowest'
-    gained, recent = xp.count(b''.join(reply(f'r{i}', 1).encode() for i in range(xp.RECENT + 50)), {})
+    gained, recent = xp.count([reply(f'r{i}', 1).encode() for i in range(xp.RECENT + 50)], {})
     assert gained == xp.RECENT + 50 and len(recent) == xp.RECENT, 'remembered ids stay bounded'
     real_dir = STATE_DIR
     with tempfile.TemporaryDirectory() as tmp:

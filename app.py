@@ -97,6 +97,7 @@ class PetApp(GameMixin, MenuMixin):
         self.menu_x, self.area = 0, self.work_area()  # the strip sits on this monitor's work area
         self.cats, self.acked, self.sounded, self.images = {}, {}, {}, {}
         self.hide, self.settings, self.xp, self.sprites = True, None, {}, None
+        self.hover, self.hover_at = None, 0.0  # the pet the pointer rests on, since when
         self.apply(read_config())
         root.update_idletasks()
         self.hwnd = int(root.wm_frame(), 16)
@@ -136,8 +137,7 @@ class PetApp(GameMixin, MenuMixin):
         if self.pack is None:  # Chill mode, or Game mode without a usable cast
             self.pack_key = settings['pack'] if settings['pack'] in packs() else 'cats'
             self.pack = packs()[self.pack_key]
-        else:
-            self.start_xp()
+        self.start_counting()  # tokens for levels and the hover cards, in either mode
         self.canvas.delete('all')
         self.images, self.cats, self.menu_hits = {}, {}, None  # first: the old pets' kinds mean nothing in this pack
         if self.game:  # the cast's frames come zoomed already: screen px throughout
@@ -346,6 +346,8 @@ class PetApp(GameMixin, MenuMixin):
                     busy = (busy or cat.moving or cat.mode == 'working' or cat.y > 0 or cat.vy > 0 or bool(cat.fx)
                             or cat.held or bool(cat.bugs or cat.shots or cat.bursts) or cat.boss is not None
                             or cat.flash > 0)
+                if self.hover:
+                    self.hover_card(now)
                 if self.menu_hits is not None:
                     self.close_menu() if now > self.menu_until or self.hide else self.canvas.tag_raise('menu')
             elif self.canvas.find_all():
@@ -603,7 +605,7 @@ class PetApp(GameMixin, MenuMixin):
             line = {'AskUserQuestion': 'ask_q', 'ExitPlanMode': 'ask_plan'}.get(detail, 'ask_tool' if detail else 'ask_any')
             want = ('waiting', text[line].format(name=name, tool=detail), cat.rec.get('ask') or click)
         else:
-            want = ('tag', f'{name} · Lv {cat.level}', cat.bar, cat.tier) if self.game else ('tag', name)
+            want = ('tag', self.hero_label(cat, name), cat.bar, cat.tier) if self.game else ('tag', name)
         bottom = top if want[0] != 'tag' else top - self.ui
         d, key = cat.decor, (*want, cat.kind)
         if d and d['key'] == key:

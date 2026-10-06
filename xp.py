@@ -37,11 +37,11 @@ def tier_of(level):
     return next((3 - i for i, start in enumerate(TIERS) if level >= start), 0)
 
 
-def count(data, recent):
+def count(lines, recent):
     """Output tokens in whole JSONL lines (bytes). recent = {reply id: tokens counted}, oldest first: a reply
     logged again (often with a bigger count) adds only what it adds. Returns (gained, recent)."""
     recent, gained = dict(recent), 0
-    for line in data.splitlines():
+    for line in lines:
         if b'"output_tokens"' not in line:
             continue
         try:
@@ -64,9 +64,20 @@ def count(data, recent):
     return gained, recent
 
 
+def whole_lines(f, read):
+    """A file's complete lines from where it is, one at a time (one transcript can be gigabytes), adding up
+    their bytes in read[0]; a half-written last line waits for the next scan."""
+    for line in f:
+        if not line.endswith(b'\n'):
+            return
+        read[0] += len(line)
+        yield line
+
+
 def scan(store, root=None):
     """The store after reading what Claude wrote since `store`. With no store yet, what is already there is
-    history (everyone starts at Lv 1); files that appear later are read from their start."""
+    history (everyone starts at Lv 1); files that appear later are read from their start. A store of
+    {'files': {}} has no history: every transcript is read from its start."""
     root = root or PROJECTS
     store = store if isinstance(store, dict) else {}
     first = not isinstance(store.get('files'), dict)
@@ -87,15 +98,14 @@ def scan(store, root=None):
         offset = size if first else old.get(name, 0)
         offset = min(offset, size) if isinstance(offset, int) else size  # cut short: carry on from its new end
         if size > offset:
+            read = [offset]
             try:
                 with path.open('rb') as f:
                     f.seek(offset)
-                    data = f.read(size - offset)
+                    gained, recent = count(whole_lines(f, read), recent)
+                offset = read[0]
             except OSError:
-                data = b''
-            end = data.rfind(b'\n') + 1  # whole lines only; a half-written one waits for the next scan
-            gained, recent = count(data[:end], recent)
-            offset += end
+                gained = 0  # can't read it now: the next scan tries again from the same place
             if gained:
                 project = name.split('/', 1)[0].lower()
                 tokens[project] = tokens.get(project, 0) + gained

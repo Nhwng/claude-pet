@@ -17,7 +17,8 @@ from look import (CLASS_ICON_COLORS, CLASS_ICONS, FONT_TAG, FONT_TITLE, FX_COLOR
                   XP_COLOR)
 from sprites import SPARKLE, TWINKLE
 
-SCAN_SECS = 5                 # how often Claude's transcripts are read for new tokens
+SCAN_SECS = 5                 # how often Claude's transcripts are read for new tokens (for levels)
+ALL_EVERY = 6                 # scans between reads for the all-time totals on the hover cards
 FLASH_SECS = 2.0              # how long "LEVEL UP!" shows
 MAX_ON_SCREEN, MAX_QUEUE = 3, 20
 SPAWN_GAP = .45               # seconds between bugs coming out of the queue
@@ -40,6 +41,16 @@ MELEE = ('slash', 'punch')    # these run up to a bug; the others shoot from whe
 CHARGE_SPEED, PATROL_SPEED = 40, 14   # ui px per second
 PATROL_SPAN = 40              # ui px either side of where a hero was put
 CHASE_SPAN = 60               # how far from there it runs after a bug, so heroes keep to their own ground
+
+
+def ints(found):
+    """{name: count} from a file someone could have edited: anything but whole numbers is dropped."""
+    return {k: v for k, v in found.items() if isinstance(v, int)} if isinstance(found, dict) else {}
+
+
+def tallies(found):
+    """{project: {'bosses': n, 'bugs': n}} from game.json, likewise."""
+    return {p: ints(c) for p, c in found.items() if isinstance(c, dict)} if isinstance(found, dict) else {}
 
 
 class GameMixin:
@@ -66,31 +77,54 @@ class GameMixin:
         return {'img': f['img'], 'anchor': 'nw', 'dx': f['dx'], 'dy': f['dy'], 'top': 0, 'height': f['h'],
                 'head': f['w'] / 2, 'left': 0, 'right': f['w'], 'width': f['w']}
 
-    # --- experience ---
-    def start_xp(self):
-        """Read Claude's transcripts for new tokens on a thread. The window only reads self.xp, which the thread
-        swaps for a fresh dict and never changes in place."""
-        if getattr(self, 'xp_thread', None):
+    # --- tokens and tallies, in game.json ---
+    def start_counting(self):
+        """Read Claude's transcripts for new tokens on a thread, in either mode: since Game mode was first on, for
+        levels (only while it is on), and all of them, for the hover cards (one long first read, then a look every
+        half minute). The thread also saves the bosses and bugs beaten. The window only reads self.xp,
+        self.written (None while the first read runs) and self.kills, all swapped for fresh dicts, never changed
+        in place."""
+        if getattr(self, 'counter', None):
             return
         path = pet.STATE_DIR / pet.GAME
         saved = pet.read_json(path)
-        tokens = saved.get('tokens') if isinstance(saved, dict) else None
-        self.xp = {k: v for k, v in tokens.items() if isinstance(v, int)} if isinstance(tokens, dict) else {}
+        saved = saved if isinstance(saved, dict) else {}
+        every = saved['all'] if isinstance(saved.get('all'), dict) else {'files': {}}  # {'files': {}}: from the start
+        self.xp, self.kills = ints(saved.get('tokens')), tallies(saved.get('kills'))
+        self.written = ints(every['tokens']) if isinstance(every.get('tokens'), dict) else None
 
         def loop():
-            store = saved
+            store, total, last, rounds = saved, every, saved, 0
             while True:
                 try:
                     if (self.settings or {}).get('mode') == 'game':
-                        fresh = xp.scan(store)
-                        if fresh != store:
-                            pet.write_json(path, fresh)
-                        store, self.xp = fresh, fresh['tokens']
+                        store = xp.scan(store)
+                        self.xp = store['tokens']
+                    if rounds % ALL_EVERY == 0:
+                        total = xp.scan(total)
+                        self.written = total['tokens']
+                    rounds += 1
+                    out = {**{k: store[k] for k in ('tokens', 'files', 'recent') if k in store},
+                           'all': total, 'kills': self.kills}
+                    if out != last:
+                        pet.write_json(path, out)
+                        last = out
                 except Exception:  # a bad scan waits for the next round; this thread must never die
                     self.report(*sys.exc_info())
                 time.sleep(SCAN_SECS)
-        self.xp_thread = threading.Thread(target=loop, daemon=True)
-        self.xp_thread.start()
+        self.counter = threading.Thread(target=loop, daemon=True)
+        self.counter.start()
+
+    def tally(self, cat, what):
+        """One more of 'bosses' or 'bugs' beaten for this hero's project."""
+        project = self.project(cat.rec)
+        mine = self.kills.get(project, {})
+        self.kills = {**self.kills, project: {**mine, what: mine.get(what, 0) + 1}}
+
+    def hero_label(self, cat, name):
+        """A hero's name plate: its project, level and, once it has some, the bosses it has beaten."""
+        bosses = self.kills.get(self.project(cat.rec), {}).get('bosses', 0)
+        return f'{name} · Lv {cat.level}' + (f' · ☠ {bosses}' if bosses else '')
 
     # --- each frame ---
     def game_step(self, cat, dt):
@@ -253,6 +287,7 @@ class GameMixin:
         self.impact(cat, bug['x'], self.sprites.body('bugs', bug['kind'])[1] * .6)
         if bug['hp'] <= 0:
             bug['hit'] = bug['t']
+            self.tally(cat, 'bugs')
             return
         side = 1 if bug['x'] > cat.x + self.width(cat.kind) / 2 else -1
         bug['stun'] = self.anim_secs('bugs', bug['kind'], 'hurt')
@@ -318,6 +353,7 @@ class GameMixin:
             self.impact(cat, boss['x'], self.sprites.body('bosses', kind)[1] * .6, boss=True, kill=boss['hp'] <= 0)
             if boss['hp'] <= 0:
                 boss['hit'] = boss['t']
+                self.tally(cat, 'bosses')
             else:
                 boss['stun'] = self.anim_secs('bosses', kind, 'hurt')
                 boss['push'] = (1 if gap > 0 else -1) * KNOCKBACK / 2 * u / boss['stun']
