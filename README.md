@@ -6,7 +6,7 @@ Pixel pets that live above your Windows taskbar and tell you when **Claude Code*
 
 ![Three slimes on the taskbar hopping and using Water Gun, Ember and Razor Leaf, one saying "blog is done!", one asking to run npm run migrate](docs/demo-slimes.gif)
 
-![Game mode: a knight, a mage and an elf fighter cutting down goblins, mushrooms and flying eyes; when a session finishes, a skeleton boss marches up and goes down](docs/demo-game.gif)
+![Game mode: a knight, a mage and an elf fighter cutting down goblins, mushrooms and flying eyes; when a session finishes, a dark knight boss marches up and is cut down; the pointer rests on the mage and its card shows the tokens Claude has written, the tokens to its next level and the bosses and bugs it has beaten](docs/demo-game.gif)
 
 - **One pet per Claude Code session**, from the VS Code extension or the CLI.
 - **While Claude works**, cats chase a ball of yarn, and the Critters, a family of slimes, hop around and use their moves: Water Gun, Ember, Razor Leaf.
