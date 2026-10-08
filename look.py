@@ -8,7 +8,8 @@ TEXT = {
            'screen_main': 'Main screen', 'screen_second': 'Second screen', 'screen_n': 'Screen {n}',
            'screen_auto': 'Follow my window', 'mode': 'Mode', 'mode_chill': 'Chill', 'mode_game': 'Game',
            'levelup': 'LEVEL UP!', 'written': 'Claude has written {n} tokens', 'counting': 'Counting tokens…',
-           'to_next': '{n} tokens to Lv {level}', 'top': 'Top level!', 'beaten': '{bosses} bosses · {bugs} bugs beaten'},
+           'to_next': '{n} tokens to Lv {level}', 'top': 'Top level!', 'beaten': '{bosses} bosses · {bugs} bugs beaten',
+           'agents': 'Agents at work: {kinds}'},
     'vi': {'done': '{name} xong rồi!', 'ask_q': '{name} cần bạn trả lời câu hỏi', 'ask_plan': '{name} cần bạn duyệt plan',
            'ask_tool': '{name} cần bạn duyệt {tool}', 'ask_any': '{name} cần bạn quyết định', 'click': 'bấm vào {pet} để mở',
            'pets': 'Bộ pet', 'swap': 'Đổi sang {pet}', 'settings': 'Cài đặt', 'big': 'Pet to hơn', 'sound': 'Âm hiệu ứng',
@@ -16,7 +17,8 @@ TEXT = {
            'screen_main': 'Màn hình chính', 'screen_second': 'Màn hình phụ', 'screen_n': 'Màn hình {n}',
            'screen_auto': 'Tự động', 'mode': 'Chế độ', 'mode_chill': 'Chill', 'mode_game': 'Game',
            'levelup': 'LÊN CẤP!', 'written': 'Claude đã viết {n} token', 'counting': 'Đang đếm token…',
-           'to_next': 'Còn {n} token lên Lv {level}', 'top': 'Cấp tối đa!', 'beaten': 'Đã hạ {bosses} boss · {bugs} bug'},
+           'to_next': 'Còn {n} token lên Lv {level}', 'top': 'Cấp tối đa!', 'beaten': 'Đã hạ {bosses} boss · {bugs} bug',
+           'agents': 'Agent đang chạy: {kinds}'},
 }
 
 INK, MUTED, PAPER, SHADOW = '#2a2230', '#8a7f8c', '#fffdf7', '#1d1822'

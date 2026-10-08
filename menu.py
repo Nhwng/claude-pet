@@ -171,6 +171,8 @@ class MenuMixin:
         text, project = TEXT[lang], self.project(cat.rec)
         written = None if self.written is None else text['written'].format(n=short(self.written.get(project, 0), lang))
         lines = [(Path(cat.rec.get('cwd') or '?').name, FONT_TITLE, INK), (written or text['counting'], FONT_SUB, INK)]
+        if cat.agents:
+            lines.append((self.party_line(cat, lang), FONT_SUB, INK))
         if self.game:
             tokens, kills = self.xp.get(project, 0), self.kills.get(project, {})
             level = xp.level_of(tokens)

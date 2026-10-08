@@ -27,11 +27,13 @@ CONFIG, GAME = 'config.json', 'game.json'   # live in STATE_DIR next to the sess
 RESERVED = (CONFIG, GAME)                   # names a session file must never take
 ASK_TOOLS = ('AskUserQuestion', 'ExitPlanMode')  # tools that always mean "Claude needs you"
 HOOK_EVENTS = {'UserPromptSubmit': '*', 'PostToolUse': '*', 'PermissionRequest': '*', 'Notification': '*',
-               'PreToolUse': '|'.join(ASK_TOOLS), 'Stop': '*', 'SessionEnd': '*'}
+               'PreToolUse': '|'.join(ASK_TOOLS), 'Stop': '*', 'SessionEnd': '*', 'SubagentStart': '*',
+               'SubagentStop': '*'}
 HOOK_MARK = '/pet.py" hook'  # install writes posix paths; the slash keeps other-pet.py's hooks safe
 ALARMS = ('done', 'waiting')
 STALE_SECS = 15 * 60      # 'working' with no event this long: probably interrupted (Esc fires no Stop)
 FORGET_SECS = 6 * 3600    # VS Code can close without SessionEnd
+AGENT_SECS = 3600         # a subagent "running" this long ended without its SubagentStop (an interrupt, a crash)
 LOG_MAX = 512 * 1024
 PROGRAMS = Path(os.environ.get('APPDATA', '')) / 'Microsoft' / 'Windows' / 'Start Menu' / 'Programs'
 START_LINK, STARTUP_LINK = PROGRAMS / 'Claude Pet.lnk', PROGRAMS / 'Startup' / 'Claude Pet.lnk'  # menu; sign-in
@@ -124,12 +126,16 @@ def handle_event(payload, env=os.environ):
         return
     if f'{sid}.json'.lower() in RESERVED:
         return  # a session named "config" or "game" must not overwrite those files
+    if payload.get('hook_event_name') in ('SubagentStart', 'SubagentStop'):
+        return agent_event(sid, payload)
     path = STATE_DIR / f'{sid}.json'
     cur = read_json(path) or {}
     new = next_state(cur.get('state'), payload.get('hook_event_name'), payload)
     ask = ask_text(payload) if new in ALARMS else ''
     if new is None:
         path.unlink(missing_ok=True)
+        for agent in STATE_DIR.glob(f'{sid}~*.agent'):
+            agent.unlink(missing_ok=True)
     elif not (new == cur.get('state') and new in ALARMS):  # repeated alarm keeps its ts, so a seen alarm stays seen
         write_json(path, {'state': new, 'cwd': payload.get('cwd') or cur.get('cwd', ''), 'ts': time.time(),
                           'project': project_of(payload) or cur.get('project', ''),
@@ -138,6 +144,19 @@ def handle_event(payload, env=os.environ):
                                    + (payload.get('hook_event_name') == 'PostToolUse')})
     elif ask and not cur.get('ask'):  # the same alarm, but now we know what it is about
         write_json(path, {**cur, 'ask': ask})
+
+
+def agent_event(sid, payload):
+    """A subagent starting or stopping. Each running one is a file of its own, <session>~<agent>.agent: Claude
+    starts several at once, and their hooks run side by side, so one shared file would lose some of them."""
+    agent = re.sub(r'[^\w-]', '', str(payload.get('agent_id', '')))[:80]
+    if not agent:
+        return
+    path = STATE_DIR / f'{sid}~{agent}.agent'
+    if payload.get('hook_event_name') == 'SubagentStart':
+        write_json(path, {'type': str(payload.get('agent_type') or 'agent')[:40], 'ts': time.time()})
+    else:
+        path.unlink(missing_ok=True)
 
 
 def log_event(payload):
@@ -302,6 +321,23 @@ def load_states(now):
             continue
         states[path.stem] = rec
     return states
+
+
+def load_agents(now):
+    """{session: [(started, agent id, agent type), ...]} of the subagents running now, oldest first. One that has
+    been running for over AGENT_SECS surely ended without a SubagentStop: its file goes."""
+    found = {}
+    for path in STATE_DIR.glob('*~*.agent'):
+        rec = read_json(path)
+        ts = rec.get('ts') if isinstance(rec, dict) else None
+        if not isinstance(ts, (int, float)):
+            continue  # being written right now (or not ours)
+        if now - ts > AGENT_SECS:
+            path.unlink(missing_ok=True)
+            continue
+        sid, agent = path.stem.split('~', 1)
+        found.setdefault(sid, []).append((ts, agent, str(rec.get('type') or 'agent')))
+    return {sid: sorted(agents) for sid, agents in found.items()}
 
 
 def run_ui():
@@ -479,8 +515,18 @@ def selftest():
         assert read_json(path) == {**waiting, 'ask': 'Ship it?'}, '...filled in later, same timestamp'
         send('Stop', transcript_path='C:/u/.claude/projects/C--code-shop/abc.jsonl')
         assert read_json(path)['project'] == 'c--code-shop'
+        before = read_json(path)
+        send('SubagentStart', agent_id='subagent_1', agent_type='Explore')
+        send('SubagentStart', agent_id='subagent_2', agent_type='code-reviewer')
+        assert [a[2] for a in load_agents(time.time())['abc']] == ['Explore', 'code-reviewer'], 'agents, oldest first'
+        assert read_json(path) == before, "agents coming and going don't touch the session (nor a seen alarm)"
+        send('SubagentStop', agent_id='subagent_1', agent_type='Explore')
+        assert [a[1] for a in load_agents(time.time())['abc']] == ['subagent_2'], 'a finished agent goes'
+        write_json(STATE_DIR / 'abc~old.agent', {'type': 'Plan', 'ts': time.time() - AGENT_SECS - 1})
+        assert len(load_agents(time.time())['abc']) == 1 and not (STATE_DIR / 'abc~old.agent').exists(), \
+            'an agent that never stopped is let go after an hour'
         send('SessionEnd')
-        assert not path.exists()
+        assert not path.exists() and load_agents(time.time()) == {}, 'the session ends: its agents too'
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
         send('Stop', env={'CLAUDE_CODE_ENTRYPOINT': 'claude-vscode', 'ECC_SKIP_OBSERVE': '1'})
         assert not path.exists(), 'headless runs are ignored'

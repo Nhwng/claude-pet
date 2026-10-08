@@ -10,13 +10,14 @@ from pathlib import Path
 
 import cast
 import pet
-from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_states, mode, read_config, screen_area,
-                 title_matches, write_config)
+from pet import (ALARMS, folder_names, is_fullscreen, is_title_of, load_agents, load_states, mode, read_config,
+                 screen_area, title_matches, write_config)
 import sounds
 from game import BOSS_ANIMS, GameMixin
 from look import (ALARM_COLORS, CHIP_LINE, FONT_SUB, FONT_TAG, FONT_TITLE, FX_COLORS, ICON_COLORS, INK, MUTED, PAPER,
                   SHADOW, TEXT, TIER_COLORS, XP_COLOR)
 from menu import MenuMixin
+from party import PartyMixin
 from sprites import (ICONS, MOVE_END, MOVE_FIRE, MOVES, PARTICLE_COLORS, PARTICLES, SPARKLE, TWINKLE, YARN, YARN_COLORS,
                      ZZZ_BIG, ZZZ_SMALL, packs, tr, with_outline)
 
@@ -70,9 +71,10 @@ class Cat:
         self.bugs, self.shots, self.bursts, self.boss = [], [], [], None
         self.ouch, self.home, self.goal, self.pause, self.stride = 0.0, None, None, 0.0, 1.0  # flinch, patrol
         self.move, self.shake = 'attack', 0.0              # which of its attacks it swings; a boss kill's shake
+        self.agents, self.party = [], {}                   # its session's subagents, and their companions
 
 
-class PetApp(GameMixin, MenuMixin):
+class PetApp(GameMixin, MenuMixin, PartyMixin):
     def __init__(self):
         import tkinter as tk
         self.tk, self.u = tk, user32()
@@ -258,12 +260,13 @@ class PetApp(GameMixin, MenuMixin):
             self.apply(settings)
         self.settings = settings  # picks change without dealing the pets again
         now, cats = time.time(), {}
+        agents = load_agents(now)
         for sid, rec in load_states(now).items():
             cat = self.cats.get(sid)
             if cat is None:
                 kind = self.kind_for(rec, cats)
                 cat = Cat(kind, self.free_spot(kind, cats))
-            cat.rec = rec
+            cat.rec, cat.agents = rec, agents.get(sid, [])
             cats[sid] = cat
         for sid in self.cats.keys() - cats.keys():
             self.canvas.delete(self.cats[sid].tag)
@@ -345,7 +348,7 @@ class PetApp(GameMixin, MenuMixin):
                     self.draw(cat)
                     busy = (busy or cat.moving or cat.mode == 'working' or cat.y > 0 or cat.vy > 0 or bool(cat.fx)
                             or cat.held or bool(cat.bugs or cat.shots or cat.bursts) or cat.boss is not None
-                            or cat.flash > 0)
+                            or cat.flash > 0 or bool(cat.party))
                 if self.hover:
                     self.hover_card(now)
                 if self.menu_hits is not None:
@@ -361,6 +364,7 @@ class PetApp(GameMixin, MenuMixin):
     def step(self, sid, cat, now, dt):
         cat.mode = mode(cat.rec, self.acked.get(sid, 0), now)
         cat.t += dt
+        self.party_step(cat, dt)
         if cat.mode != 'working':
             cat.move_t = cat.ball = None
         if cat.held:  # in your hand: no walking, no falling
@@ -586,6 +590,7 @@ class PetApp(GameMixin, MenuMixin):
         if self.game:
             self.draw_battle(cat, base)
             self.game_extras(cat, base, left, right, top, box)
+        self.draw_party(cat, base)
         if cat.mode == 'done':
             self.sparkles(cat, left, right, top)
         elif cat.mode == 'idle':
