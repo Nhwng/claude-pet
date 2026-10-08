@@ -1,11 +1,13 @@
 """Subagents as companions. While Claude runs subagents for a session, small pets come out beside its pet, one per
 agent (three at most, then a "+2"), in a puff of sparkles, and puff away when their agent is done. In Game mode
-they are the Critters slimes: they hop along with the hero and shoot their moves at the bugs. In Chill mode they
-are little ones of the pet's own pack. Mixed into PetApp.
+they are the Critters slimes: they hop along with the hero, and each one's agent's tool calls are bugs of its own,
+which it shoots its moves at (the hero takes over any left when the agent is done). In Chill mode they are little
+ones of the pet's own pack. Mixed into PetApp.
 
 Positions are screen px; a companion's x is its left edge and its y (and speeds) are its own sprite px.
 """
 import random
+import time
 import zlib
 from collections import Counter
 
@@ -18,14 +20,17 @@ HOP_UP, FALL = 22.0, 60.0    # a hop: sprite px per second up, and per second sq
 HOP_DRIFT = 26.0             # sprite px per second toward its spot while in the air
 WALK = 34.0                  # sprite px per second, for companions that walk (cats)
 SHOT_SPEED = 120             # ui px per second
-COOLDOWN = (1.8, 3.2)        # seconds between a companion's shots
+COOLDOWN = (1.0, 1.8)        # seconds between a companion's shots
 RANGE = 150                  # ui px: how far away a bug can be for a companion to shoot at it
+MATE_QUEUE, MATE_ON_SCREEN = 6, 2   # a companion's own bugs: waiting, and out at once
+SPAWN_GAP = .6               # seconds between a companion's bugs coming out
+FRESH_SECS = 10              # an agent younger than this when its companion comes out: all its tool calls count
 RAYS = ((1, 0), (-1, 0), (.6, -.8), (-.6, -.8), (.6, .8), (-.6, .8))
 
 
 class PartyMixin:
-    """Uses PetApp's pack, cats (each with .agents from pet.load_agents and its .party), canvas, scale, ui, dpi,
-    width(), art(), pixels(), fx_px(); in Game mode, damage()."""
+    """Uses PetApp's pack, cats (each with .agents from pet.load_agents and its .party), canvas, images, scale, ui,
+    dpi, width(), art(), pixels(), fx_px(); in Game mode, damage() and spawn_bug()."""
 
     def party_source(self):
         """(pack, zoom) the companions come from, or (None, zoom) when there is none."""
@@ -33,7 +38,25 @@ class PartyMixin:
             return self.pack, max(self.dpi, self.scale - self.dpi)  # a size smaller than the pet itself
         if not hasattr(self, 'critters'):
             self.critters = packs().get('critters')  # loaded once: the image cache keys on its colour dicts
-        return self.critters, 2 * self.dpi
+        return self.critters, 1.5 * self.dpi  # smaller than the bugs, bigger than a kitten
+
+    def mini_art(self, rows, colors, z):
+        """art() at a zoom that may be half a step: 1.5x is zoom 3, then every other pixel."""
+        if z == int(z):
+            return self.art(rows, colors, int(z))
+        key = ('half', tuple(rows), id(colors), z)
+        if key not in self.images:
+            self.images[key] = self.art(rows, colors, int(z * 2)).subsample(2)
+        return self.images[key]
+
+    def mate_spot(self, cat, agent):
+        """(center x, width) of an agent's companion while it is out; None for no agent, or one gone."""
+        mate = cat.party.get(agent) if agent is not None else None
+        pack, z = self.party_source()
+        if mate is None or mate['gone'] is not None or pack is None:
+            return None
+        mw, _ = self.mate_size(pack, mate['kind'], z)
+        return mate['x'] + mw / 2, mw
 
     def party_step(self, cat, dt):
         pack, z = self.party_source()
@@ -41,9 +64,12 @@ class PartyMixin:
             cat.party = {}
             return
         shown = cat.agents[:MAX_SHOWN]
-        for slot, (_, agent, kind) in enumerate(shown):
-            cat.party.setdefault(agent, self.summon(cat, pack, kind, z))['slot'] = slot
-        live = {agent for _, agent, _ in shown}
+        tools = {}
+        for slot, (started, agent, kind, calls) in enumerate(shown):
+            fresh = started > time.time() - FRESH_SECS  # a new agent's first calls are bugs; an old one's are history
+            cat.party.setdefault(agent, self.summon(cat, pack, kind, z, 0 if fresh else calls))['slot'] = slot
+            tools[agent] = calls
+        live = {agent for _, agent, *_ in shown}
         for agent, mate in list(cat.party.items()):
             if agent not in live and mate['gone'] is None:
                 mate['gone'] = 0.0  # its agent is done: off in a puff
@@ -54,19 +80,20 @@ class PartyMixin:
                 continue
             mate['born'] += dt
             self.follow(cat, mate, pack, z, dt)
-            if self.game:
-                self.mate_attack(cat, mate, pack, z, dt)
+            if self.game and cat.mode == 'working':  # like the hero, it holds still while Claude waits for you
+                self.mate_bugs(cat, agent, mate, tools[agent], dt)
+                self.mate_attack(cat, agent, mate, pack, z, dt)
 
-    def summon(self, cat, pack, kind, z):
-        """A new companion at the pet's side. One agent type always brings the same one (another pet than the
-        pet itself, when the pack has others)."""
+    def summon(self, cat, pack, kind, z, calls):
+        """A new companion at the pet's side; calls: its agent's tool calls so far that are not bugs. One agent type
+        always brings the same one (another pet than the pet itself, when the pack has others)."""
         pets = range(len(pack['pets']))
         choices = [k for k in pets if self.game or k != cat.kind] or list(pets)
         pick = choices[zlib.crc32(kind.encode('utf-8')) % len(choices)]
         mw, _ = self.mate_size(pack, pick, z)
         return {'kind': pick, 'x': cat.x + self.width(cat.kind) / 2 - mw / 2, 'y': 0.0, 'vy': 0.0, 'dir': cat.dir,
                 'slot': 0, 'crouch': 0.0, 'wait': random.uniform(.2, .6), 'moving': False, 'born': 0.0, 'gone': None,
-                'cool': random.uniform(*COOLDOWN), 'cast': 9.0, 'shots': []}
+                'cool': random.uniform(*COOLDOWN), 'cast': 9.0, 'shots': [], 'tools': calls, 'queue': 0, 'spawn': 0.0}
 
     @staticmethod
     def mate_size(pack, kind, z):
@@ -102,14 +129,24 @@ class PartyMixin:
             mate['x'] += min(WALK * z * dt, abs(gap)) * (1 if gap > 0 else -1)
             mate['moving'] = True
 
-    def mate_attack(self, cat, mate, pack, z, dt):
-        """On the ground with a bug in range, a slime uses its move on it every couple of seconds; the shot lands
-        like one of the hero's blows."""
+    def mate_bugs(self, cat, agent, mate, calls, dt):
+        """Its agent's new tool calls join its queue as bugs, which come out past it, two at a time."""
+        mate['queue'] = min(mate['queue'] + max(0, calls - mate['tools']), MATE_QUEUE)
+        mate['tools'], mate['spawn'] = calls, max(0.0, mate['spawn'] - dt)
+        out = sum(b['hit'] is None and b.get('owner') == agent for b in cat.bugs)
+        if mate['queue'] and mate['spawn'] == 0 and out < MATE_ON_SCREEN and self.sprites.cast['bugs']:
+            self.spawn_bug(cat, agent)
+            mate['queue'], mate['spawn'] = mate['queue'] - 1, SPAWN_GAP
+
+    def mate_attack(self, cat, agent, mate, pack, z, dt):
+        """On the ground with one of its bugs in range, a slime uses its move on it every second or so; the shot
+        lands like one of the hero's blows."""
         u = self.ui
         mw, mh = self.mate_size(pack, mate['kind'], z)
         mate['cool'] -= dt
         mate['cast'] += dt
-        center, live = mate['x'] + mw / 2, [b for b in cat.bugs if b['hit'] is None]
+        center = mate['x'] + mw / 2
+        live = [b for b in cat.bugs if b['hit'] is None and b.get('owner') == agent]
         if mate['cool'] <= 0 and mate['y'] == 0 and live:
             bug = min(live, key=lambda b: abs(b['x'] - center))
             if abs(bug['x'] - center) <= RANGE * u:
@@ -120,7 +157,7 @@ class PartyMixin:
         for shot in mate['shots']:
             shot['x'] += shot['dir'] * SHOT_SPEED * u * dt
             shot['age'] += dt
-            bug = next((b for b in cat.bugs if b['hit'] is None and abs(b['x'] - shot['x']) < b['w'] / 2), None)
+            bug = next((b for b in live if b['hit'] is None and abs(b['x'] - shot['x']) < b['w'] / 2), None)
             if bug:
                 self.damage(cat, bug)
             elif 0 <= shot['x'] <= self.w and shot['age'] < 2:
@@ -151,7 +188,7 @@ class PartyMixin:
             if mate['gone'] is None:
                 rows = pet['frames'][self.mate_frame(cat, mate, pack)]
                 rows = [r[::-1] for r in rows] if mate['dir'] < 0 else rows
-                self.canvas.create_image(int(mate['x']), int(ground), image=self.art(rows, pet['colors'], z),
+                self.canvas.create_image(int(mate['x']), int(ground), image=self.mini_art(rows, pet['colors'], z),
                                          anchor='sw', tags=('fx',))
             age = mate['born'] if mate['gone'] is None else mate['gone']
             if age < POOF_SECS:
@@ -183,6 +220,6 @@ class PartyMixin:
 
     def party_line(self, cat, lang):
         """The hover card's line about them: 'Agents at work: Explore ×2, code-reviewer'."""
-        kinds = Counter(kind for *_, kind in cat.agents).most_common(3)
-        names = ', '.join(f'{kind[:18]} ×{n}' if n > 1 else kind[:18] for kind, n in kinds)
-        return TEXT[lang]['agents'].format(kinds=names + (', …' if len(set(k for *_, k in cat.agents)) > 3 else ''))
+        kinds = Counter(agent[2] for agent in cat.agents)
+        names = ', '.join(f'{kind[:18]} ×{n}' if n > 1 else kind[:18] for kind, n in kinds.most_common(3))
+        return TEXT[lang]['agents'].format(kinds=names + (', …' if len(kinds) > 3 else ''))

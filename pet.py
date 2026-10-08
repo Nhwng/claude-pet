@@ -128,6 +128,8 @@ def handle_event(payload, env=os.environ):
         return  # a session named "config" or "game" must not overwrite those files
     if payload.get('hook_event_name') in ('SubagentStart', 'SubagentStop'):
         return agent_event(sid, payload)
+    if payload.get('hook_event_name') == 'PostToolUse' and payload.get('agent_id'):
+        agent_tool(sid, payload)  # a bug for its companion, not the hero
     path = STATE_DIR / f'{sid}.json'
     cur = read_json(path) or {}
     new = next_state(cur.get('state'), payload.get('hook_event_name'), payload)
@@ -141,22 +143,32 @@ def handle_event(payload, env=os.environ):
                           'project': project_of(payload) or cur.get('project', ''),
                           'detail': payload.get('tool_name', '') if new == 'waiting' else '', 'ask': ask,
                           'tools': (cur.get('tools') if isinstance(cur.get('tools'), int) else 0)
-                                   + (payload.get('hook_event_name') == 'PostToolUse')})
+                                   + (payload.get('hook_event_name') == 'PostToolUse' and not payload.get('agent_id'))})
     elif ask and not cur.get('ask'):  # the same alarm, but now we know what it is about
         write_json(path, {**cur, 'ask': ask})
+
+
+def agent_path(sid, payload):
+    agent = re.sub(r'[^\w-]', '', str(payload.get('agent_id', '')))[:80]
+    return STATE_DIR / f'{sid}~{agent}.agent' if agent else None
 
 
 def agent_event(sid, payload):
     """A subagent starting or stopping. Each running one is a file of its own, <session>~<agent>.agent: Claude
     starts several at once, and their hooks run side by side, so one shared file would lose some of them."""
-    agent = re.sub(r'[^\w-]', '', str(payload.get('agent_id', '')))[:80]
-    if not agent:
-        return
-    path = STATE_DIR / f'{sid}~{agent}.agent'
-    if payload.get('hook_event_name') == 'SubagentStart':
-        write_json(path, {'type': str(payload.get('agent_type') or 'agent')[:40], 'ts': time.time()})
-    else:
+    path = agent_path(sid, payload)
+    if path and payload.get('hook_event_name') == 'SubagentStart':
+        write_json(path, {'type': str(payload.get('agent_type') or 'agent')[:40], 'ts': time.time(), 'tools': 0})
+    elif path:
         path.unlink(missing_ok=True)
+
+
+def agent_tool(sid, payload):
+    """One more tool call by a running subagent (one it isn't running, or never saw start, is left alone)."""
+    path = agent_path(sid, payload)
+    rec = read_json(path) if path else None
+    if isinstance(rec, dict):
+        write_json(path, {**rec, 'tools': (rec.get('tools') if isinstance(rec.get('tools'), int) else 0) + 1})
 
 
 def log_event(payload):
@@ -324,8 +336,8 @@ def load_states(now):
 
 
 def load_agents(now):
-    """{session: [(started, agent id, agent type), ...]} of the subagents running now, oldest first. One that has
-    been running for over AGENT_SECS surely ended without a SubagentStop: its file goes."""
+    """{session: [(started, agent id, agent type, tool calls), ...]} of the subagents running now, oldest first.
+    One that has been running for over AGENT_SECS surely ended without a SubagentStop: its file goes."""
     found = {}
     for path in STATE_DIR.glob('*~*.agent'):
         rec = read_json(path)
@@ -336,7 +348,8 @@ def load_agents(now):
             path.unlink(missing_ok=True)
             continue
         sid, agent = path.stem.split('~', 1)
-        found.setdefault(sid, []).append((ts, agent, str(rec.get('type') or 'agent')))
+        tools = rec.get('tools') if isinstance(rec.get('tools'), int) else 0
+        found.setdefault(sid, []).append((ts, agent, str(rec.get('type') or 'agent'), tools))
     return {sid: sorted(agents) for sid, agents in found.items()}
 
 
@@ -501,7 +514,9 @@ def selftest():
         assert read_json(path)['state'] == 'working'
         send('PostToolUse')
         send('PostToolUse')
-        assert read_json(path)['tools'] == 2, 'each tool call counts once (a bug in Game mode)'
+        send('PostToolUse', agent_id='subagent_9')
+        assert read_json(path)['tools'] == 2, "each tool call counts once (a bug in Game mode), a subagent's not here"
+        assert load_agents(time.time()) == {}, "a tool call of an agent we never saw start doesn't make one up"
         send('Stop')
         done = read_json(path)
         send('Notification', notification_type='idle_prompt')
@@ -518,7 +533,9 @@ def selftest():
         before = read_json(path)
         send('SubagentStart', agent_id='subagent_1', agent_type='Explore')
         send('SubagentStart', agent_id='subagent_2', agent_type='code-reviewer')
-        assert [a[2] for a in load_agents(time.time())['abc']] == ['Explore', 'code-reviewer'], 'agents, oldest first'
+        send('PostToolUse', agent_id='subagent_2')
+        assert [a[2:] for a in load_agents(time.time())['abc']] == [('Explore', 0), ('code-reviewer', 1)], \
+            'agents, oldest first, each with its own tool calls'
         assert read_json(path) == before, "agents coming and going don't touch the session (nor a seen alarm)"
         send('SubagentStop', agent_id='subagent_1', agent_type='Explore')
         assert [a[1] for a in load_agents(time.time())['abc']] == ['subagent_2'], 'a finished agent goes'

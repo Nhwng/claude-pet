@@ -23,6 +23,7 @@ FLASH_SECS = 2.0              # how long "LEVEL UP!" shows
 MAX_ON_SCREEN, MAX_QUEUE = 3, 20
 SPAWN_GAP = .45               # seconds between bugs coming out of the queue
 SPAWN_AT = (55, 95)           # ui px in front of the hero
+MATE_SPAWN_AT = (30, 55)      # ui px past a companion, for its own bugs
 BUG_SPEED = 30                # ui px per second
 REACH = {'slash': 14, 'punch': 22, 'spell': 80, 'arrow': 90}   # ui px from the hero's side to a bug it can hit
 SHOT_SPEED = {'arrow': 150, 'spell': 110}                       # ui px per second, for the attacks that fly
@@ -185,7 +186,8 @@ class GameMixin:
         attack, center = self.pack['pets'][cat.kind]['attack'], cat.x + w / 2
         cat.spawn = max(0.0, cat.spawn - dt)
         live = [b for b in cat.bugs if b['hit'] is None]
-        if cat.queue and cat.spawn == 0 and len(live) < MAX_ON_SCREEN and self.sprites.cast['bugs']:
+        mine = [b for b in live if self.mate_spot(cat, b.get('owner')) is None]  # companions see to their own
+        if cat.queue and cat.spawn == 0 and len(mine) < MAX_ON_SCREEN and self.sprites.cast['bugs']:
             self.spawn_bug(cat)
         for bug in live:
             if bug['stun'] > 0:   # reeling from a blow: sliding back, no crawling, no biting
@@ -193,11 +195,13 @@ class GameMixin:
                 bug['x'] = min(max(bug['x'] + bug['push'] * dt, bug['w']), self.w - bug['w'])
                 bug['near'] = False
                 continue
-            gap = bug['x'] - center
-            bug['near'] = abs(gap) <= w / 2 + bug['w'] / 2 + 2 * u
-            if not bug['near']:   # crawl up to the hero
+            foe, foe_w = self.foe_of(cat, bug)
+            gap = bug['x'] - foe
+            bug['near'] = abs(gap) <= foe_w / 2 + bug['w'] / 2 + 2 * u
+            if not bug['near']:   # crawl up to the hero, or to its companion
                 bug['x'] -= (1 if gap > 0 else -1) * BUG_SPEED * u * dt
             self.bite(cat, bug, dt)
+        live = mine
         cat.ouch = max(0.0, cat.ouch - dt)
         if self.swing(cat, dt):
             self.strike(cat, attack, live)
@@ -218,15 +222,24 @@ class GameMixin:
         if live or cat.swing > 0:
             cat.goal = None  # back to strolling from wherever the fight ended
 
+    def foe_of(self, cat, bug):
+        """(center x, width) of who a bug goes for: its companion while that is out, otherwise the hero."""
+        spot = self.mate_spot(cat, bug.get('owner'))
+        if spot:
+            return spot
+        w = self.width(cat.kind)
+        return cat.x + w / 2, w
+
     def bite(self, cat, bug, dt):
-        """A bug at the hero's feet has a go now and then; if the hero isn't busy swinging, it flinches."""
+        """A bug at its foe's feet has a go now and then; if that's the hero and it isn't busy swinging, it
+        flinches."""
         bug['bite'] = max(0.0, bug.get('bite', 0.0) - dt)
         if not bug['near']:
             return
         bug['next'] = bug.get('next', random.uniform(.5, 1.5)) - dt
         if bug['next'] <= 0:
             bug['next'], bug['bite'] = random.uniform(1.6, 3.2), self.anim_secs('bugs', bug['kind'], 'attack')
-            if cat.swing <= 0:
+            if cat.swing <= 0 and self.mate_spot(cat, bug.get('owner')) is None:
                 cat.ouch = self.anim_secs('heroes', cat.kind, 'hurt')
 
     def walk(self, cat, gap, speed, dt):
@@ -252,11 +265,20 @@ class GameMixin:
             return
         self.walk(cat, gap, PATROL_SPEED, dt)
 
-    def spawn_bug(self, cat):
-        """One bug out of the queue, a little way in front of the hero (or behind it, if a wall is in front)."""
+    def spawn_bug(self, cat, owner=None):
+        """One bug out of a queue: the hero's, a little way in front of it (or behind it, if a wall is in front),
+        or one for a companion (owner: its agent), on its far side from the hero."""
         u, w = self.ui, self.width(cat.kind)
         kind = random.randrange(len(self.sprites.cast['bugs']))
         bw = self.sprites.body('bugs', kind)[0]
+        spot = self.mate_spot(cat, owner)
+        if spot:
+            side = 1 if spot[0] >= cat.x + w / 2 else -1
+            x = spot[0] + side * (spot[1] / 2 + random.uniform(*MATE_SPAWN_AT) * u)
+            x = x if bw <= x <= self.w - bw else spot[0] - side * (spot[1] / 2 + MATE_SPAWN_AT[0] * u)
+            cat.bugs.append({'x': min(max(x, bw), self.w - bw), 'kind': kind, 'w': bw, 't': 0.0, 'hit': None,
+                             'near': False, 'hp': random.choice(BUG_HP), 'stun': 0.0, 'push': 0.0, 'owner': owner})
+            return
         others = [c.x for c in self.cats.values() if c is not cat]
         room_left = cat.x - max([o for o in others if o < cat.x], default=0)
         room_right = min([o for o in others if o > cat.x], default=self.w) - cat.x - w
@@ -290,7 +312,7 @@ class GameMixin:
             bug['hit'] = bug['t']
             self.tally(cat, 'bugs')
             return
-        side = 1 if bug['x'] > cat.x + self.width(cat.kind) / 2 else -1
+        side = 1 if bug['x'] > self.foe_of(cat, bug)[0] else -1  # away from whoever hit it
         bug['stun'] = self.anim_secs('bugs', bug['kind'], 'hurt')
         bug['push'], bug['bite'] = side * KNOCKBACK * self.ui / bug['stun'], 0.0
 
@@ -299,7 +321,8 @@ class GameMixin:
         for shot in cat.shots:
             shot['x'] += shot['dir'] * SHOT_SPEED[shot['kind']] * u * dt
             shot['age'] += dt
-            bug = next((b for b in cat.bugs if b['hit'] is None and abs(b['x'] - shot['x']) < b['w'] / 2), None)
+            bug = next((b for b in cat.bugs if b['hit'] is None and abs(b['x'] - shot['x']) < b['w'] / 2
+                        and self.mate_spot(cat, b.get('owner')) is None), None)  # the hero's own bugs only
             if bug:
                 self.damage(cat, bug)
                 cat.bursts.append({'x': bug['x'], 't': 0.0, 'kind': shot['kind']})
@@ -397,7 +420,8 @@ class GameMixin:
                 anim, t = ('idle' if bug['near'] else 'run'), bug['t']
             n, fps = self.sprites.frames_in('bugs', bug['kind'], anim)
             i = min(int(t * fps), n - 1) if anim in ('death', 'attack', 'hurt') else int(t * fps)
-            self.put_sprite('bugs', bug['kind'], anim, i, 1 if bug['x'] < center else -1, bug['x'], ground)
+            self.put_sprite('bugs', bug['kind'], anim, i, 1 if bug['x'] < self.foe_of(cat, bug)[0] else -1, bug['x'],
+                            ground)
         boss = cat.boss
         if boss:
             if boss['hit'] is not None:
