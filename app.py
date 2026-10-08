@@ -4,6 +4,7 @@ pet.py writes each Claude session's state; this file draws one pet per session f
 """
 import os
 import random
+import re
 import sys
 import time
 from pathlib import Path
@@ -528,9 +529,8 @@ class PetApp(GameMixin, MenuMixin, PartyMixin):
         if key not in self.images:
             img = self.tk.PhotoImage(width=len(rows[0]), height=len(rows))
             for y, row in enumerate(rows):
-                for x, ch in enumerate(row):
-                    if ch != '.':
-                        img.put(colors[ch], (x, y))
+                for run in re.finditer(r'[^.]+', row):  # a stretch of pixels at a time: fast for big sprites
+                    img.put('{%s}' % ' '.join(colors[ch] for ch in run.group()), to=(run.start(), y))
             self.images[key] = img.zoom(size)
         return self.images[key]
 
